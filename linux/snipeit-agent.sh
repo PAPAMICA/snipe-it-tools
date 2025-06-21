@@ -56,10 +56,10 @@ detect_system_info() {
     if [[ -z "$VCPU" || "$VCPU" == "0" ]]; then
         if command -v nproc >/dev/null 2>&1; then
             VCPU=$(nproc)
-            log_message "INFO" "Detected CPU cores: $VCPU"
+            log_message "DEBUG" "Detected CPU cores: $VCPU"
         elif [[ -f /proc/cpuinfo ]]; then
             VCPU=$(grep -c processor /proc/cpuinfo)
-            log_message "INFO" "Detected CPU cores: $VCPU"
+            log_message "DEBUG" "Detected CPU cores: $VCPU"
         else
             VCPU="1"
             log_message "WARNING" "Unable to detect CPU cores, using default: 1"
@@ -71,11 +71,11 @@ detect_system_info() {
         if command -v free >/dev/null 2>&1; then
             local mem_kb=$(free | grep Mem | awk '{print $2}')
             MEMORY=$((mem_kb / 1024 / 1024))
-            log_message "INFO" "Detected memory: ${MEMORY}GB"
+            log_message "DEBUG" "Detected memory: ${MEMORY}GB"
         elif [[ -f /proc/meminfo ]]; then
             local mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
             MEMORY=$((mem_kb / 1024 / 1024))
-            log_message "INFO" "Detected memory: ${MEMORY}GB"
+            log_message "DEBUG" "Detected memory: ${MEMORY}GB"
         else
             MEMORY="1"
             log_message "WARNING" "Unable to detect memory, using default: 1GB"
@@ -86,10 +86,10 @@ detect_system_info() {
     if [[ -z "$DISKS" ]]; then
         if command -v lsblk >/dev/null 2>&1; then
             DISKS=$(lsblk -d -o NAME,SIZE,TYPE | grep -E "(disk|loop)" | awk '{print $1 ": " $2}' | tr '\n' ', ' | sed 's/, $//')
-            log_message "INFO" "Detected disks: $DISKS"
+            log_message "DEBUG" "Detected disks: $DISKS"
         elif command -v df >/dev/null 2>&1; then
             DISKS=$(df -h / | tail -1 | awk '{print $1 ": " $2}')
-            log_message "INFO" "Detected disk: $DISKS"
+            log_message "DEBUG" "Detected disk: $DISKS"
         else
             DISKS="Unknown"
             log_message "WARNING" "Unable to detect disk information"
@@ -101,13 +101,13 @@ detect_system_info() {
         if [[ -f /etc/os-release ]]; then
             source /etc/os-release
             OS="$NAME $VERSION"
-            log_message "INFO" "Detected OS: $OS"
+            log_message "DEBUG" "Detected OS: $OS"
         elif [[ -f /etc/redhat-release ]]; then
             OS=$(cat /etc/redhat-release)
-            log_message "INFO" "Detected OS: $OS"
+            log_message "DEBUG" "Detected OS: $OS"
         elif [[ -f /etc/debian_version ]]; then
             OS="Debian $(cat /etc/debian_version)"
-            log_message "INFO" "Detected OS: $OS"
+            log_message "DEBUG" "Detected OS: $OS"
         else
             OS="Unknown"
             log_message "WARNING" "Unable to detect OS"
@@ -118,10 +118,10 @@ detect_system_info() {
     if [[ -z "$IP_ADDRESS" ]]; then
         if command -v ip >/dev/null 2>&1; then
             IP_ADDRESS=$(ip route get 1.1.1.1 | grep -oP 'src \K\S+' | head -1)
-            log_message "INFO" "Detected IP address: $IP_ADDRESS"
+            log_message "DEBUG" "Detected IP address: $IP_ADDRESS"
         elif command -v hostname >/dev/null 2>&1; then
             IP_ADDRESS=$(hostname -I | awk '{print $1}')
-            log_message "INFO" "Detected IP address: $IP_ADDRESS"
+            log_message "DEBUG" "Detected IP address: $IP_ADDRESS"
         else
             IP_ADDRESS=""
             log_message "WARNING" "Unable to detect IP address"
@@ -132,7 +132,7 @@ detect_system_info() {
     if [[ -z "$HOSTNAME" ]]; then
         if command -v hostname >/dev/null 2>&1; then
             HOSTNAME=$(hostname)
-            log_message "INFO" "Detected hostname: $HOSTNAME"
+            log_message "DEBUG" "Detected hostname: $HOSTNAME"
         else
             HOSTNAME=""
             log_message "WARNING" "Unable to detect hostname"
@@ -147,15 +147,15 @@ detect_system_info() {
         if command -v dpkg >/dev/null 2>&1; then
             # Debian/Ubuntu systems - format as app (version)
             software_list=$(dpkg -l | grep '^ii' | awk '{print $2 " (" $3 ")"}' | head -20 | paste -sd ", " -)
-            log_message "INFO" "Detected software (Debian/Ubuntu): $software_list"
+            log_message "DEBUG" "Detected software (Debian/Ubuntu): $software_list"
         elif command -v rpm >/dev/null 2>&1; then
             # Red Hat/CentOS systems - format as app (version)
             software_list=$(rpm -qa --queryformat '%{NAME} (%{VERSION})\n' | head -20 | paste -sd ", " -)
-            log_message "INFO" "Detected software (Red Hat/CentOS): $software_list"
+            log_message "DEBUG" "Detected software (Red Hat/CentOS): $software_list"
         elif command -v pacman >/dev/null 2>&1; then
             # Arch Linux systems - format as app (version)
             software_list=$(pacman -Q | awk '{print $1 " (" $2 ")"}' | head -20 | paste -sd ", " -)
-            log_message "INFO" "Detected software (Arch): $software_list"
+            log_message "DEBUG" "Detected software (Arch): $software_list"
         else
             software_list="Unknown package manager"
             log_message "WARNING" "Unable to detect installed software"
@@ -169,7 +169,7 @@ detect_system_info() {
 
 # Function to get custom field column names
 get_custom_field_columns() {
-    log_message "INFO" "Getting custom field column names..."
+    log_message "DEBUG" "Getting custom field column names..."
     
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
@@ -251,7 +251,7 @@ check_asset_exists() {
     local asset_tag="$1"
     local asset_name="$2"
     
-    log_message "INFO" "Checking if asset exists"
+    log_message "DEBUG" "Checking if asset exists"
     
     local search_term=""
     if [[ -n "$asset_tag" ]]; then
@@ -281,7 +281,7 @@ check_asset_exists() {
         return 0
     fi
     
-    log_message "INFO" "No existing asset found"
+    log_message "DEBUG" "No existing asset found"
     return 1
 }
 
@@ -289,7 +289,8 @@ check_asset_exists() {
 get_model_id() {
     local model_name="$1"
     
-    log_message "INFO" "Getting model ID: $model_name"
+    # Log to stderr to avoid interfering with return value
+    log_message "DEBUG" "Getting model ID: $model_name" >&2
     
     # Try exact search first
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
@@ -324,7 +325,10 @@ get_model_id() {
         return 1
     fi
     
-    # Return only the clean model ID
+    # Log success to stderr
+    log_message "DEBUG" "Model found: $model_name (ID: $model_id)" >&2
+    
+    # Return only the clean model ID to stdout
     printf "%s" "$model_id"
 }
 
@@ -562,13 +566,13 @@ main() {
     if [[ -z "$ASSET_NAME" ]]; then
         if [[ -n "$HOSTNAME" ]]; then
             ASSET_NAME="$HOSTNAME"
-            log_message "INFO" "Using hostname as asset name: $ASSET_NAME"
+            log_message "DEBUG" "Using hostname as asset name: $ASSET_NAME"
         else
             # Try to get hostname from system
             local system_hostname=$(hostname 2>/dev/null || echo "")
             if [[ -n "$system_hostname" ]]; then
                 ASSET_NAME="$system_hostname"
-                log_message "INFO" "Using system hostname as asset name: $ASSET_NAME"
+                log_message "DEBUG" "Using system hostname as asset name: $ASSET_NAME"
             else
                 log_message "ERROR" "No asset name provided and unable to determine hostname"
                 log_message "INFO" "Please provide an asset name with --name option or hostname with --hostname option"
@@ -581,7 +585,7 @@ main() {
     if [[ "$NO_AUTO_DETECT" != "true" ]]; then
         detect_system_info
     else
-        log_message "INFO" "Auto-detection disabled, using provided values only"
+        log_message "DEBUG" "Auto-detection disabled, using provided values only"
     fi
     
     # Get custom field column names
@@ -609,7 +613,7 @@ main() {
         exit 1
     fi
     
-    log_message "INFO" "Using model ID: $model_id"
+    log_message "DEBUG" "Using model ID: $model_id"
     
     # Create asset
     if create_asset "$model_id"; then
