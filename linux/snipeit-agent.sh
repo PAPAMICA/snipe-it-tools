@@ -321,65 +321,57 @@ validate_server_url() {
 
 # Function to get model ID
 get_model_id() {
-    log_message "INFO" "Getting model ID: $MODEL_NAME"
+    local model_name="$1"
     
     # Try exact search first
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/models?search=$MODEL_NAME&limit=10")
+        "$SNIPEIT_SERVER/api/v1/models?search=$model_name&limit=10")
     
     if [[ $? -ne 0 ]]; then
-        log_message "ERROR" "Error getting model"
         return 1
     fi
     
-    if [[ "$VERBOSE" == "true" ]]; then
-        log_message "DEBUG" "Model search response: $response"
-    fi
-    
     local model_id=$(echo "$response" | jq -r '.rows[0].id // empty')
-    local model_name=$(echo "$response" | jq -r '.rows[0].name // empty')
-    
-    if [[ "$VERBOSE" == "true" ]]; then
-        log_message "DEBUG" "First search - model_id: '$model_id', model_name: '$model_name'"
-    fi
+    local model_name_found=$(echo "$response" | jq -r '.rows[0].name // empty')
     
     if [[ -z "$model_id" || "$model_id" == "null" ]]; then
         # Try without search parameter to get all models
-        log_message "INFO" "Exact search failed, trying to get all models..."
         response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
             "$SNIPEIT_SERVER/api/v1/models?limit=50")
         
         if [[ $? -ne 0 ]]; then
-            log_message "ERROR" "Error getting all models"
             return 1
         fi
         
-        if [[ "$VERBOSE" == "true" ]]; then
-            log_message "DEBUG" "All models response: $response"
-        fi
-        
         # Use jq to find exact match
-        model_id=$(echo "$response" | jq -r --arg name "$MODEL_NAME" '.rows[] | select(.name == $name) | .id' 2>/dev/null | head -1)
-        model_name="$MODEL_NAME"
-        
-        if [[ "$VERBOSE" == "true" ]]; then
-            log_message "DEBUG" "Second search - model_id: '$model_id', model_name: '$model_name'"
-        fi
+        model_id=$(echo "$response" | jq -r --arg name "$model_name" '.rows[] | select(.name == $name) | .id' 2>/dev/null | head -1)
+        model_name_found="$model_name"
     fi
     
     if [[ -z "$model_id" || "$model_id" == "null" ]]; then
-        log_message "ERROR" "Model '$MODEL_NAME' not found"
-        log_message "INFO" "Available models:"
-        echo "$response" | jq -r '.rows[] | "  - \(.name) (ID: \(.id))"' 2>/dev/null || log_message "INFO" "Unable to list available models"
         return 1
     fi
     
-    # Clean the model_id to ensure it's just a number
-    model_id=$(echo "$model_id" | tr -d '[:space:]' | tr -d '\n' | tr -d '\r')
+    # Return only the clean model ID
+    printf "%s" "$model_id"
+}
+
+# Function to get model ID with logging (wrapper)
+get_model_id_with_logging() {
+    local model_name="$1"
+    
+    log_message "INFO" "Getting model ID: $model_name"
+    
+    # Get the model ID without any logging
+    local model_id=$(get_model_id "$model_name")
+    if [[ $? -ne 0 || -z "$model_id" ]]; then
+        log_message "ERROR" "Model '$model_name' not found"
+        return 1
+    fi
     
     log_message "SUCCESS" "Model found: $model_name (ID: $model_id)"
     printf "%s" "$model_id"
@@ -802,23 +794,11 @@ main() {
         exit 0
     fi
     
-    # Get model ID using a temporary approach to avoid log contamination
+    # Get model ID
     local model_id
-    local temp_output
-    
-    # Temporarily redirect stderr to capture model_id cleanly
-    temp_output=$(get_model_id 2>/dev/null)
-    if [[ $? -ne 0 || -z "$temp_output" ]]; then
-        log_message "ERROR" "Unable to get model ID"
-        exit 1
-    fi
-    
-    # Clean the model_id
-    model_id=$(echo "$temp_output" | tr -d '[:space:]' | tr -d '\n' | tr -d '\r' | sed 's/[^0-9]//g')
-    
-    # Validate that model_id is a number
-    if ! [[ "$model_id" =~ ^[0-9]+$ ]]; then
-        log_message "ERROR" "Model ID is not a valid number: '$model_id'"
+    model_id=$(get_model_id "$MODEL_NAME")
+    if [[ $? -ne 0 || -z "$model_id" ]]; then
+        log_message "ERROR" "Unable to get model ID for: $MODEL_NAME"
         exit 1
     fi
     
