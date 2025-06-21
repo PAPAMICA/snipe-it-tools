@@ -338,6 +338,13 @@ update_asset_custom_fields() {
     
     log_message "INFO" "Updating custom fields for asset ID: $asset_id"
     
+    # Calculate dates
+    local expected_checkin_date=$(date '+%Y-%m-%d')
+    local next_audit_date=$(date -d '+1 year' '+%Y-%m-%d' 2>/dev/null || date -v+1y '+%Y-%m-%d' 2>/dev/null || date '+%Y-%m-%d')
+    
+    log_message "DEBUG" "Expected Checkin Date: $expected_checkin_date"
+    log_message "DEBUG" "Next Audit Date: $next_audit_date"
+    
     # Escape custom field values for JSON
     local escaped_disks=$(escape_json_string "$DISKS")
     local escaped_hostname=$(escape_json_string "$HOSTNAME")
@@ -348,6 +355,8 @@ update_asset_custom_fields() {
     # Build JSON for custom fields update (at root level as per Snipe-IT API docs)
     local update_data=$(cat << EOF
 {
+    "expected_checkin_date": "$expected_checkin_date",
+    "next_audit_date": "$next_audit_date",
     "$DISKS_COLUMN": "$escaped_disks",
     "$MEMORY_COLUMN": $MEMORY,
     "$VCPU_COLUMN": $VCPU,
@@ -431,6 +440,13 @@ create_asset() {
     
     log_message "DEBUG" "Using model ID: $model_id"
     
+    # Calculate dates
+    local expected_checkin_date=$(date '+%Y-%m-%d')
+    local next_audit_date=$(date -d '+1 year' '+%Y-%m-%d' 2>/dev/null || date -v+1y '+%Y-%m-%d' 2>/dev/null || date '+%Y-%m-%d')
+    
+    log_message "DEBUG" "Expected Checkin Date: $expected_checkin_date"
+    log_message "DEBUG" "Next Audit Date: $next_audit_date"
+    
     # Escape custom field values for JSON
     local escaped_disks=$(escape_json_string "$DISKS")
     local escaped_hostname=$(escape_json_string "$HOSTNAME")
@@ -447,6 +463,8 @@ create_asset() {
     "model_id": $model_id,
     "status_id": 1,
     "asset_tag": "$escaped_asset_tag",
+    "expected_checkin_date": "$expected_checkin_date",
+    "next_audit_date": "$next_audit_date",
     "$DISKS_COLUMN": "$escaped_disks",
     "$MEMORY_COLUMN": $MEMORY,
     "$VCPU_COLUMN": $VCPU,
