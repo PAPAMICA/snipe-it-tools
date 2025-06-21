@@ -9,7 +9,7 @@ set -e  # Stop script on error
 # Default configuration
 DEFAULT_STATUS="Pending"
 DEFAULT_AUDIT_INTERVAL="1 year"
-DEFAULT_EXPECTED_CHECKIN_INTERVAL="2 days"
+DEFAULT_EXPECTED_CHECKIN_INTERVAL="0 days"
 
 # Colors for messages
 RED='\033[0;31m'
@@ -537,8 +537,8 @@ check_asset_exists() {
         local existing_id=$(echo "$existing_asset" | jq -r '.id')
         local existing_name=$(echo "$existing_asset" | jq -r '.name')
         log_message "INFO" "Existing asset found - ID: $existing_id, Name: $existing_name"
-        # Return only the clean ID
-        printf "%s" "$existing_id"
+        # Store the ID in a global variable to avoid printf issues
+        ASSET_ID_TO_UPDATE="$existing_id"
         return 0
     fi
     
@@ -1449,8 +1449,7 @@ main() {
     fi
     
     # Check if asset exists
-    local existing_asset_id
-    if existing_asset_id=$(check_asset_exists "$ASSET_TAG" "$ASSET_NAME"); then
+    if check_asset_exists "$ASSET_TAG" "$ASSET_NAME"; then
         log_message "INFO" "Asset already exists. Updating custom fields..."
         
         # Test API connection first
@@ -1460,7 +1459,7 @@ main() {
         fi
         
         # Verify asset access
-        if ! verify_asset_access "$existing_asset_id"; then
+        if ! verify_asset_access "$ASSET_ID_TO_UPDATE"; then
             log_message "ERROR" "Cannot access the existing asset"
             exit 1
         fi
@@ -1471,12 +1470,12 @@ main() {
         fi
         
         # Update custom fields with fallback
-        if update_asset_custom_fields "$existing_asset_id"; then
+        if update_asset_custom_fields "$ASSET_ID_TO_UPDATE"; then
             log_message "SUCCESS" "Asset custom fields updated successfully"
             exit 0
         else
             log_message "WARNING" "Primary update method failed, trying fallback method..."
-            if update_asset_custom_fields_fallback "$existing_asset_id"; then
+            if update_asset_custom_fields_fallback "$ASSET_ID_TO_UPDATE"; then
                 log_message "SUCCESS" "Asset custom fields updated successfully (fallback method)"
                 exit 0
             else
@@ -1544,6 +1543,7 @@ NO_AUTO_DETECT="false"
 FORCE_UPDATE="false"
 NO_CUSTOM_FIELDS="false"
 FORCE_CUSTOM_FIELDS="false"
+ASSET_ID_TO_UPDATE=""
 
 # Custom field column names (will be populated by get_custom_field_columns)
 DISKS_COLUMN=""
