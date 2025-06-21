@@ -329,6 +329,10 @@ get_model_id() {
     local model_id=$(echo "$response" | jq -r '.rows[0].id // empty')
     local model_name=$(echo "$response" | jq -r '.rows[0].name // empty')
     
+    if [[ "$VERBOSE" == "true" ]]; then
+        log_message "DEBUG" "First search - model_id: '$model_id', model_name: '$model_name'"
+    fi
+    
     if [[ -z "$model_id" || "$model_id" == "null" ]]; then
         # Try without search parameter to get all models
         log_message "INFO" "Exact search failed, trying to get all models..."
@@ -337,12 +341,22 @@ get_model_id() {
             -H "Content-Type: application/json" \
             "$SNIPEIT_SERVER/api/v1/models?limit=50")
         
+        if [[ $? -ne 0 ]]; then
+            log_message "ERROR" "Error getting all models"
+            return 1
+        fi
+        
         if [[ "$VERBOSE" == "true" ]]; then
             log_message "DEBUG" "All models response: $response"
         fi
         
-        model_id=$(echo "$response" | jq -r '.rows[] | select(.name == "'$MODEL_NAME'") | .id' 2>/dev/null | head -1)
+        # Use jq to find exact match
+        model_id=$(echo "$response" | jq -r --arg name "$MODEL_NAME" '.rows[] | select(.name == $name) | .id' 2>/dev/null | head -1)
         model_name="$MODEL_NAME"
+        
+        if [[ "$VERBOSE" == "true" ]]; then
+            log_message "DEBUG" "Second search - model_id: '$model_id', model_name: '$model_name'"
+        fi
     fi
     
     if [[ -z "$model_id" || "$model_id" == "null" ]]; then
