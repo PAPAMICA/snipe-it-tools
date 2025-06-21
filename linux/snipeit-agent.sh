@@ -568,7 +568,7 @@ main() {
     fi
 }
 
-# Variables globales
+# Global variables
 SNIPEIT_SERVER=""
 API_TOKEN=""
 MODEL_NAME=""
@@ -592,7 +592,7 @@ SOFTWARE=""
 VERBOSE="false"
 AUTO_INSTALL="false"
 
-# Traitement des arguments
+# Argument processing
 while [[ $# -gt 0 ]]; do
     case $1 in
         -s|--server)
@@ -695,7 +695,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Vérification et installation des dépendances
+# Dependency checking and installation
 if [[ "$AUTO_INSTALL" == "true" ]]; then
     install_dependencies
     if [[ $? -ne 0 ]]; then
@@ -707,8 +707,8 @@ if [[ "$AUTO_INSTALL" == "true" ]]; then
         exit 1
     fi
 else
-    # Vérification simple des dépendances
-    local missing_deps=()
+    # Simple dependency checking
+    missing_deps=()
     if ! command -v curl >/dev/null 2>&1; then
         missing_deps+=("curl")
     fi
@@ -727,7 +727,7 @@ else
     fi
 fi
 
-# Valeurs par défaut pour les champs optionnels
+# Default values for optional fields
 [[ -z "$ASSET_TAG" ]] && ASSET_TAG=""
 [[ -z "$COMPANY_NAME" ]] && COMPANY_NAME=""
 [[ -z "$LOCATION_NAME" ]] && LOCATION_NAME=""
@@ -745,5 +745,5 @@ fi
 [[ -z "$OS" ]] && OS=""
 [[ -z "$SOFTWARE" ]] && SOFTWARE=""
 
-# Exécution du script principal
+# Execute main script
 main "$@"
