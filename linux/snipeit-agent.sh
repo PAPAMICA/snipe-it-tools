@@ -372,12 +372,12 @@ update_asset_custom_fields() {
     local managed_fields=("$DISKS_COLUMN" "$MEMORY_COLUMN" "$VCPU_COLUMN" "$HOSTNAME_COLUMN" "$IP_COLUMN" "$OS_COLUMN" "$SOFTWARE_COLUMN")
     local preserved_fields=""
     
-    # Extract all custom fields from the current asset
-    while IFS= read -r field_data; do
-        if [[ -n "$field_data" ]]; then
-            local field_name=$(echo "$field_data" | jq -r '.name')
-            local field_column=$(echo "$field_data" | jq -r '.db_column_name')
-            local field_value=$(echo "$field_data" | jq -r '.value // empty')
+    # Extract all custom fields from the current asset using a simpler approach
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            local field_name=$(echo "$line" | cut -d'|' -f1)
+            local field_column=$(echo "$line" | cut -d'|' -f2)
+            local field_value=$(echo "$line" | cut -d'|' -f3)
             
             # Check if this field is not managed by our script
             local is_managed=false
@@ -398,7 +398,7 @@ update_asset_custom_fields() {
                 log_message "DEBUG" "Preserving field: $field_name ($field_column) = '$field_value'"
             fi
         fi
-    done < <(echo "$current_asset" | jq -r '.custom_fields | to_entries[] | {name: .key, db_column_name: .value.field, value: .value.value}')
+    done < <(echo "$current_asset" | jq -r '.custom_fields | to_entries[] | "\(.key)|\(.value.field)|\(.value.value // empty)"')
     
     # Build JSON for custom fields update
     local update_data
