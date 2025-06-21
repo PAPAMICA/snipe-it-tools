@@ -365,24 +365,45 @@ update_asset_custom_fields() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Build JSON for custom fields update - include all custom fields with current values
-    local update_data=$(cat << EOF
-{
-    "$DISKS_COLUMN": "$escaped_disks",
-    "$MEMORY_COLUMN": $MEMORY,
-    "$VCPU_COLUMN": $VCPU,
-    "$HOSTNAME_COLUMN": "$escaped_hostname",
-    "$IP_COLUMN": "$escaped_ip",
-    "$OS_COLUMN": "$escaped_os",
-    "$SOFTWARE_COLUMN": "$escaped_software",
-    "_snipeit_mac_address_1": $(echo "$current_asset" | jq -r '._snipeit_mac_address_1 // null'),
-    "_snipeit_documentation_2": $(echo "$current_asset" | jq -r '._snipeit_documentation_2 // null'),
-    "_snipeit_supervision_3": $(echo "$current_asset" | jq -r '._snipeit_supervision_3 // null'),
-    "_snipeit_teams_11": $(echo "$current_asset" | jq -r '._snipeit_teams_11 // null'),
-    "_snipeit_roles_12": $(echo "$current_asset" | jq -r '._snipeit_roles_12 // null')
-}
-EOF
-)
+    # Build JSON for custom fields update - only include fields that exist and are not null
+    local update_data="{"
+    
+    # Add our managed fields
+    update_data+="\"$DISKS_COLUMN\": \"$escaped_disks\","
+    update_data+="\"$MEMORY_COLUMN\": $MEMORY,"
+    update_data+="\"$VCPU_COLUMN\": $VCPU,"
+    update_data+="\"$HOSTNAME_COLUMN\": \"$escaped_hostname\","
+    update_data+="\"$IP_COLUMN\": \"$escaped_ip\","
+    update_data+="\"$OS_COLUMN\": \"$escaped_os\","
+    update_data+="\"$SOFTWARE_COLUMN\": \"$escaped_software\""
+    
+    # Add other custom fields only if they exist and are not null
+    local mac_address=$(echo "$current_asset" | jq -r '._snipeit_mac_address_1 // empty')
+    if [[ -n "$mac_address" && "$mac_address" != "null" ]]; then
+        update_data+=", \"_snipeit_mac_address_1\": $(echo "$current_asset" | jq -r '._snipeit_mac_address_1')"
+    fi
+    
+    local documentation=$(echo "$current_asset" | jq -r '._snipeit_documentation_2 // empty')
+    if [[ -n "$documentation" && "$documentation" != "null" ]]; then
+        update_data+=", \"_snipeit_documentation_2\": $(echo "$current_asset" | jq -r '._snipeit_documentation_2')"
+    fi
+    
+    local supervision=$(echo "$current_asset" | jq -r '._snipeit_supervision_3 // empty')
+    if [[ -n "$supervision" && "$supervision" != "null" ]]; then
+        update_data+=", \"_snipeit_supervision_3\": $(echo "$current_asset" | jq -r '._snipeit_supervision_3')"
+    fi
+    
+    local teams=$(echo "$current_asset" | jq -r '._snipeit_teams_11 // empty')
+    if [[ -n "$teams" && "$teams" != "null" ]]; then
+        update_data+=", \"_snipeit_teams_11\": $(echo "$current_asset" | jq -r '._snipeit_teams_11')"
+    fi
+    
+    local roles=$(echo "$current_asset" | jq -r '._snipeit_roles_12 // empty')
+    if [[ -n "$roles" && "$roles" != "null" ]]; then
+        update_data+=", \"_snipeit_roles_12\": $(echo "$current_asset" | jq -r '._snipeit_roles_12')"
+    fi
+    
+    update_data+="}"
     
     # Validate JSON before sending
     if ! echo "$update_data" | jq . >/dev/null 2>&1; then
