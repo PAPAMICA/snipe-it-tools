@@ -216,7 +216,7 @@ get_custom_field_columns() {
     
     # List all available custom fields for debugging
     log_message "DEBUG" "Available custom fields:"
-    echo "$fields_json" | jq -r '.[] | "  - \(.name) (db_column: \(.db_column_name // "null"))"' >&2
+    log_message "DEBUG" "$fields_json" | jq -r '.[] | "  - \(.name) (db_column: \(.db_column_name // "null"))"' >&2
     
     # Extract column names for our fields
     DISKS_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Disque(s)") | .db_column_name // empty')
@@ -432,10 +432,8 @@ create_asset() {
     log_message "DEBUG" "Using model ID: $model_id"
     
     # Calculate dates
-    local expected_checkin_date=$(date '+%Y-%m-%d')
     local next_audit_date=$(date -d '+1 year' '+%Y-%m-%d' 2>/dev/null || date -v+1y '+%Y-%m-%d' 2>/dev/null || date '+%Y-%m-%d')
     
-    log_message "DEBUG" "Expected Checkin Date: $expected_checkin_date"
     log_message "DEBUG" "Next Audit Date: $next_audit_date"
     
     # Escape custom field values for JSON
@@ -454,7 +452,6 @@ create_asset() {
     "model_id": $model_id,
     "status_id": 1,
     "asset_tag": "$escaped_asset_tag",
-    "expected_checkin": "$expected_checkin_date",
     "next_audit_date": "$next_audit_date",
     "$DISKS_COLUMN": "$escaped_disks",
     "$MEMORY_COLUMN": $MEMORY,
