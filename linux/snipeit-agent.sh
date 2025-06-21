@@ -338,6 +338,26 @@ update_asset_custom_fields() {
     
     log_message "INFO" "Updating custom fields for asset ID: $asset_id"
     
+    # First, get current asset data to preserve existing custom field values
+    log_message "DEBUG" "Retrieving current asset data..."
+    local current_response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
+    
+    if [[ $? -ne 0 ]]; then
+        log_message "ERROR" "Failed to retrieve current asset data"
+        return 1
+    fi
+    
+    local current_asset=$(echo "$current_response" | jq -r '. // empty')
+    if [[ -z "$current_asset" || "$current_asset" == "null" ]]; then
+        log_message "ERROR" "Invalid response when retrieving current asset data"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Current asset data retrieved successfully"
+    
     # Escape custom field values for JSON
     local escaped_disks=$(escape_json_string "$DISKS")
     local escaped_hostname=$(escape_json_string "$HOSTNAME")
@@ -345,7 +365,7 @@ update_asset_custom_fields() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Build JSON for custom fields update - only include fields we actually use
+    # Build JSON for custom fields update - include all custom fields with current values
     local update_data=$(cat << EOF
 {
     "$DISKS_COLUMN": "$escaped_disks",
@@ -354,7 +374,12 @@ update_asset_custom_fields() {
     "$HOSTNAME_COLUMN": "$escaped_hostname",
     "$IP_COLUMN": "$escaped_ip",
     "$OS_COLUMN": "$escaped_os",
-    "$SOFTWARE_COLUMN": "$escaped_software"
+    "$SOFTWARE_COLUMN": "$escaped_software",
+    "_snipeit_mac_address_1": $(echo "$current_asset" | jq -r '._snipeit_mac_address_1 // null'),
+    "_snipeit_documentation_2": $(echo "$current_asset" | jq -r '._snipeit_documentation_2 // null'),
+    "_snipeit_supervision_3": $(echo "$current_asset" | jq -r '._snipeit_supervision_3 // null'),
+    "_snipeit_teams_11": $(echo "$current_asset" | jq -r '._snipeit_teams_11 // null'),
+    "_snipeit_roles_12": $(echo "$current_asset" | jq -r '._snipeit_roles_12 // null')
 }
 EOF
 )
