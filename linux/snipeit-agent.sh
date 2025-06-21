@@ -200,6 +200,7 @@ OPTIONS:
     -o, --order-number ORDER Order number (optional)
     -i, --invoice-number INVOICE Invoice number (optional)
     --auto-install          Automatic dependency installation (curl, jq)
+    --no-auto-detect        Disable automatic system information detection
     -v, --verbose           Verbose mode
     -h, --help             Show this help
 
@@ -211,6 +212,15 @@ CUSTOM FIELDS:
     --ip-address IP         IP address (text)
     --os OS                 Operating system (text)
     --software SOFTWARE     Software (textarea)
+
+AUTO-DETECTION:
+    The script automatically detects system information if not provided:
+    - CPU cores (vCPU)
+    - Memory (RAM) in GB
+    - Disk information
+    - Operating system
+    - IP address
+    - Hostname
 
 SUPPORTED SYSTEMS:
     - Ubuntu, Debian, Linux Mint, Pop!_OS (APT)
@@ -227,6 +237,8 @@ EXAMPLES:
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell PowerEdge R740" --hostname "srv-prod-01.company.com" --auto-install
 
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell PowerEdge R740" --auto-install
+
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-auto-detect
 
 EOF
 }
@@ -532,6 +544,11 @@ create_asset() {
     local supplier_id="$5"
     
     log_message "INFO" "Creating asset: $ASSET_NAME"
+    log_message "DEBUG" "Model ID: $model_id"
+    log_message "DEBUG" "Company ID: $company_id"
+    log_message "DEBUG" "Location ID: $location_id"
+    log_message "DEBUG" "Department ID: $department_id"
+    log_message "DEBUG" "Supplier ID: $supplier_id"
     
     # Handle empty values for JSON
     local company_json="null"
@@ -599,6 +616,98 @@ EOF
     fi
 }
 
+# Function to detect system information
+detect_system_info() {
+    log_message "INFO" "Detecting system information..."
+    
+    # Detect CPU cores
+    if [[ -z "$VCPU" || "$VCPU" == "0" ]]; then
+        if command -v nproc >/dev/null 2>&1; then
+            VCPU=$(nproc)
+            log_message "INFO" "Detected CPU cores: $VCPU"
+        elif [[ -f /proc/cpuinfo ]]; then
+            VCPU=$(grep -c processor /proc/cpuinfo)
+            log_message "INFO" "Detected CPU cores: $VCPU"
+        else
+            VCPU="1"
+            log_message "WARNING" "Unable to detect CPU cores, using default: 1"
+        fi
+    fi
+    
+    # Detect memory (in GB)
+    if [[ -z "$MEMORY" || "$MEMORY" == "0" ]]; then
+        if command -v free >/dev/null 2>&1; then
+            local mem_kb=$(free | grep Mem | awk '{print $2}')
+            MEMORY=$((mem_kb / 1024 / 1024))
+            log_message "INFO" "Detected memory: ${MEMORY}GB"
+        elif [[ -f /proc/meminfo ]]; then
+            local mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+            MEMORY=$((mem_kb / 1024 / 1024))
+            log_message "INFO" "Detected memory: ${MEMORY}GB"
+        else
+            MEMORY="1"
+            log_message "WARNING" "Unable to detect memory, using default: 1GB"
+        fi
+    fi
+    
+    # Detect disk information
+    if [[ -z "$DISKS" ]]; then
+        if command -v lsblk >/dev/null 2>&1; then
+            DISKS=$(lsblk -d -o NAME,SIZE,TYPE | grep -E "(disk|loop)" | awk '{print $1 ": " $2}' | tr '\n' ', ' | sed 's/, $//')
+            log_message "INFO" "Detected disks: $DISKS"
+        elif command -v df >/dev/null 2>&1; then
+            DISKS=$(df -h / | tail -1 | awk '{print $1 ": " $2}')
+            log_message "INFO" "Detected disk: $DISKS"
+        else
+            DISKS="Unknown"
+            log_message "WARNING" "Unable to detect disk information"
+        fi
+    fi
+    
+    # Detect operating system
+    if [[ -z "$OS" ]]; then
+        if [[ -f /etc/os-release ]]; then
+            source /etc/os-release
+            OS="$NAME $VERSION"
+            log_message "INFO" "Detected OS: $OS"
+        elif [[ -f /etc/redhat-release ]]; then
+            OS=$(cat /etc/redhat-release)
+            log_message "INFO" "Detected OS: $OS"
+        elif [[ -f /etc/debian_version ]]; then
+            OS="Debian $(cat /etc/debian_version)"
+            log_message "INFO" "Detected OS: $OS"
+        else
+            OS="Unknown"
+            log_message "WARNING" "Unable to detect OS"
+        fi
+    fi
+    
+    # Detect IP address
+    if [[ -z "$IP_ADDRESS" ]]; then
+        if command -v ip >/dev/null 2>&1; then
+            IP_ADDRESS=$(ip route get 1.1.1.1 | grep -oP 'src \K\S+' | head -1)
+            log_message "INFO" "Detected IP address: $IP_ADDRESS"
+        elif command -v hostname >/dev/null 2>&1; then
+            IP_ADDRESS=$(hostname -I | awk '{print $1}')
+            log_message "INFO" "Detected IP address: $IP_ADDRESS"
+        else
+            IP_ADDRESS=""
+            log_message "WARNING" "Unable to detect IP address"
+        fi
+    fi
+    
+    # Detect hostname if not provided
+    if [[ -z "$HOSTNAME" ]]; then
+        if command -v hostname >/dev/null 2>&1; then
+            HOSTNAME=$(hostname)
+            log_message "INFO" "Detected hostname: $HOSTNAME"
+        else
+            HOSTNAME=""
+            log_message "WARNING" "Unable to detect hostname"
+        fi
+    fi
+}
+
 # Main function
 main() {
     log_message "INFO" "Starting SnipeIT asset creation script"
@@ -613,6 +722,13 @@ main() {
     # Set default asset name if not provided
     set_default_asset_name
     
+    # Detect system information (unless disabled)
+    if [[ "$NO_AUTO_DETECT" != "true" ]]; then
+        detect_system_info
+    else
+        log_message "INFO" "Auto-detection disabled, using provided values only"
+    fi
+    
     # Calculate dates
     calculate_dates
     
@@ -622,13 +738,17 @@ main() {
         exit 0
     fi
     
-    # Get IDs
-    local model_id=$(get_model_id)
-    if [[ $? -ne 0 ]]; then
+    # Get model ID
+    local model_id
+    model_id=$(get_model_id)
+    if [[ $? -ne 0 || -z "$model_id" ]]; then
         log_message "ERROR" "Unable to get model ID"
         exit 1
     fi
     
+    log_message "INFO" "Using model ID: $model_id"
+    
+    # Get other IDs
     local company_id=$(get_company_id)
     local location_id=$(get_location_id)
     local department_id=$(get_department_id)
@@ -667,6 +787,7 @@ OS=""
 SOFTWARE=""
 VERBOSE="false"
 AUTO_INSTALL="false"
+NO_AUTO_DETECT="false"
 
 # Argument processing
 while [[ $# -gt 0 ]]; do
@@ -753,6 +874,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --auto-install)
             AUTO_INSTALL="true"
+            shift
+            ;;
+        --no-auto-detect)
+            NO_AUTO_DETECT="true"
             shift
             ;;
         -v|--verbose)
