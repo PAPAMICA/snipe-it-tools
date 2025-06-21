@@ -146,7 +146,7 @@ detect_system_info() {
         # Detect package manager and list installed packages
         if command -v dpkg >/dev/null 2>&1; then
             # Debian/Ubuntu systems - format as app (version)
-            software_list=$(dpkg -l | grep '^ii' | awk '{print $2 " (" $3 ")"}' | head -20 | paste -sd ", " -)
+            software_list=$(dpkg -l | grep '^ii' | awk '{print $2 " (" $3 ")"}' | paste -sd '|' - | sed 's/|/, /g')
             log_message "DEBUG" "Detected software (Debian/Ubuntu): $software_list"
         elif command -v rpm >/dev/null 2>&1; then
             # Red Hat/CentOS systems - format as app (version)
@@ -531,7 +531,7 @@ AUTO-DETECTION:
     - Operating system
     - IP address
     - Hostname
-    - Installed software (formatted as clean list)
+    - Installed software with version
 
 EXAMPLES:
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --hostname "server01.company.com" --ip-address "192.168.1.100"
