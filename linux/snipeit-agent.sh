@@ -202,6 +202,7 @@ OPTIONS:
     --auto-install          Automatic dependency installation (curl, jq)
     --no-auto-detect        Disable automatic system information detection
     --force-create          Force creation of new asset even if one exists
+    --auto-create-model     Automatically create model if it doesn't exist
     -v, --verbose           Verbose mode
     -h, --help             Show this help
 
@@ -227,6 +228,7 @@ BEHAVIOR:
     - If an asset exists, the script will update its custom fields
     - Use --force-create to create a new asset even if one exists
     - Use --no-auto-detect to disable automatic system detection
+    - Use --auto-create-model to automatically create the model if it doesn't exist
 
 SUPPORTED SYSTEMS:
     - Ubuntu, Debian, Linux Mint, Pop!_OS (APT)
@@ -247,6 +249,8 @@ EXAMPLES:
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-auto-detect
 
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --force-create
+
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "New Model" --auto-create-model
 
 EOF
 }
@@ -379,6 +383,18 @@ get_model_id() {
     
     if [[ -z "$model_id" || "$model_id" == "null" ]]; then
         log_message "DEBUG" "Model not found in either search"
+        
+        # List available models to help user
+        log_message "INFO" "Model '$model_name' not found. Available models:"
+        local available_models=$(echo "$response" | jq -r '.rows[] | .name' 2>/dev/null | head -10)
+        if [[ -n "$available_models" ]]; then
+            echo "$available_models" | while read -r model; do
+                log_message "INFO" "  - $model"
+            done
+        else
+            log_message "WARNING" "No models found in Snipe-IT"
+        fi
+        
         return 1
     fi
     
@@ -408,6 +424,45 @@ get_model_id_with_logging() {
     
     log_message "SUCCESS" "Model found: $model_name (ID: $model_id)"
     printf "%s" "$model_id"
+}
+
+# Function to get model ID with auto-creation
+get_model_id_with_auto_create() {
+    local model_name="$1"
+    
+    log_message "INFO" "Getting model ID for: $model_name"
+    
+    # Try to get existing model
+    local model_id=$(get_model_id "$model_name")
+    local get_result=$?
+    
+    log_message "DEBUG" "get_model_id exit code: $get_result"
+    log_message "DEBUG" "get_model_id returned: '$model_id'"
+    
+    if [[ $get_result -eq 0 && -n "$model_id" && "$model_id" != "null" ]]; then
+        log_message "SUCCESS" "Model found: $model_name (ID: $model_id)"
+        printf "%s" "$model_id"
+        return 0
+    fi
+    
+    # Model not found, try to create it if auto-create is enabled
+    if [[ "$AUTO_CREATE_MODEL" == "true" ]]; then
+        log_message "INFO" "Model '$model_name' not found, attempting to create it..."
+        model_id=$(create_model "$model_name")
+        if [[ $? -eq 0 && -n "$model_id" ]]; then
+            log_message "SUCCESS" "Model created and ready to use: $model_name (ID: $model_id)"
+            printf "%s" "$model_id"
+            return 0
+        else
+            log_message "ERROR" "Failed to create model: $model_name"
+            return 1
+        fi
+    else
+        log_message "ERROR" "Model '$model_name' not found in Snipe-IT"
+        log_message "INFO" "Available models can be checked via the Snipe-IT web interface"
+        log_message "INFO" "Use --auto-create-model to automatically create the model if it doesn't exist"
+        return 1
+    fi
 }
 
 # Function to get company ID
@@ -888,6 +943,64 @@ detect_system_info() {
     fi
 }
 
+# Function to create model if it doesn't exist
+create_model() {
+    local model_name="$1"
+    local category_id="${2:-1}"  # Default to category ID 1 (usually "Computers")
+    
+    log_message "INFO" "Creating model: $model_name"
+    
+    # Build JSON for model creation
+    local model_data=$(cat << EOF
+{
+    "name": "$model_name",
+    "category_id": $category_id,
+    "manufacturer_id": 1
+}
+EOF
+)
+    
+    # Validate JSON before sending
+    if ! echo "$model_data" | jq . >/dev/null 2>&1; then
+        log_message "ERROR" "Invalid JSON generated for model creation:"
+        log_message "ERROR" "$model_data"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Model creation data: $model_data"
+    
+    local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        -X POST \
+        -d "$model_data" \
+        "$SNIPEIT_SERVER/api/v1/models")
+    
+    local http_code=$(echo "$response" | tail -n1)
+    local response_body=$(echo "$response" | head -n -1)
+    
+    log_message "DEBUG" "Model creation HTTP code: $http_code"
+    log_message "DEBUG" "Model creation response: $response_body"
+    
+    if [[ $http_code -eq 200 || $http_code -eq 201 ]]; then
+        local status=$(echo "$response_body" | jq -r '.status // empty')
+        if [[ "$status" == "success" ]]; then
+            local model_id=$(echo "$response_body" | jq -r '.payload.id // empty')
+            log_message "SUCCESS" "Model created successfully with ID: $model_id"
+            printf "%s" "$model_id"
+            return 0
+        else
+            log_message "ERROR" "API returned error status: $status"
+            log_message "ERROR" "Response: $response_body"
+            return 1
+        fi
+    else
+        log_message "ERROR" "Error creating model - HTTP Code: $http_code"
+        log_message "ERROR" "Response: $response_body"
+        return 1
+    fi
+}
+
 # Main function
 main() {
     log_message "INFO" "Starting SnipeIT asset creation script"
@@ -937,10 +1050,12 @@ main() {
         log_message "INFO" "Force create enabled, skipping asset existence check"
     fi
     
+    log_message "DEBUG" "Continuing to model ID lookup..."
+    
     # Get model ID
     log_message "INFO" "Getting model ID for: $MODEL_NAME"
     local model_id
-    model_id=$(get_model_id_with_logging "$MODEL_NAME")
+    model_id=$(get_model_id_with_auto_create "$MODEL_NAME")
     local model_result=$?
     log_message "DEBUG" "Model ID result: $model_result, model_id: '$model_id'"
     
@@ -1000,6 +1115,7 @@ VERBOSE="false"
 AUTO_INSTALL="false"
 NO_AUTO_DETECT="false"
 FORCE_CREATE="false"
+AUTO_CREATE_MODEL="false"
 
 # Argument processing
 while [[ $# -gt 0 ]]; do
@@ -1094,6 +1210,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force-create)
             FORCE_CREATE="true"
+            shift
+            ;;
+        --auto-create-model)
+            AUTO_CREATE_MODEL="true"
             shift
             ;;
         -v|--verbose)
