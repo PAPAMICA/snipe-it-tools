@@ -559,16 +559,13 @@ create_asset() {
         return 1
     fi
     
-    # Clean model_id to ensure it's just a number
-    model_id=$(echo "$model_id" | tr -d '[:space:]' | tr -d '\n' | tr -d '\r' | sed 's/[^0-9]//g')
-    
     # Validate that model_id is a number
     if ! [[ "$model_id" =~ ^[0-9]+$ ]]; then
         log_message "ERROR" "Model ID is not a valid number: '$model_id'"
         return 1
     fi
     
-    log_message "DEBUG" "Cleaned model ID: $model_id"
+    log_message "DEBUG" "Using model ID: $model_id"
     
     # Handle empty values for JSON
     local company_json="null"
@@ -805,11 +802,23 @@ main() {
         exit 0
     fi
     
-    # Get model ID
+    # Get model ID using a temporary approach to avoid log contamination
     local model_id
-    model_id=$(get_model_id)
-    if [[ $? -ne 0 || -z "$model_id" ]]; then
+    local temp_output
+    
+    # Temporarily redirect stderr to capture model_id cleanly
+    temp_output=$(get_model_id 2>/dev/null)
+    if [[ $? -ne 0 || -z "$temp_output" ]]; then
         log_message "ERROR" "Unable to get model ID"
+        exit 1
+    fi
+    
+    # Clean the model_id
+    model_id=$(echo "$temp_output" | tr -d '[:space:]' | tr -d '\n' | tr -d '\r' | sed 's/[^0-9]//g')
+    
+    # Validate that model_id is a number
+    if ! [[ "$model_id" =~ ^[0-9]+$ ]]; then
+        log_message "ERROR" "Model ID is not a valid number: '$model_id'"
         exit 1
     fi
     
