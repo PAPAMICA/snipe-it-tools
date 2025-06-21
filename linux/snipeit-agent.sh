@@ -203,7 +203,7 @@ OPTIONS:
     --no-auto-detect        Disable automatic system information detection
     --no-custom-fields      Skip custom field column name retrieval (use defaults)
     --force-custom-fields   Force update custom fields even if not associated with model
-    --force-update          Force update of existing assets (update custom fields)
+    --force-update          Force update of existing assets (legacy option, no longer needed)
     -v, --verbose           Verbose mode
     -h, --help             Show this help
 
@@ -225,6 +225,11 @@ AUTO-DETECTION:
     - IP address
     - Hostname
 
+ASSET UPDATES:
+    If an asset with the same name or asset tag already exists, the script will
+    automatically update its custom fields with the latest system information.
+    No additional options are required for updates.
+
 SUPPORTED SYSTEMS:
     - Ubuntu, Debian, Linux Mint, Pop!_OS (APT)
     - CentOS, RHEL, Fedora, Rocky Linux, AlmaLinux (YUM/DNF)
@@ -243,11 +248,11 @@ EXAMPLES:
 
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-auto-detect
 
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell OptiPlex 7090" --force-update --hostname "pc001.company.com" --ip-address "192.168.1.100"
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell OptiPlex 7090" --hostname "pc001.company.com" --ip-address "192.168.1.100"
 
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-custom-fields --no-auto-detect
 
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --force-custom-fields --force-update
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --force-custom-fields
 
 EOF
 }
@@ -532,7 +537,8 @@ check_asset_exists() {
         local existing_id=$(echo "$existing_asset" | jq -r '.id')
         local existing_name=$(echo "$existing_asset" | jq -r '.name')
         log_message "INFO" "Existing asset found - ID: $existing_id, Name: $existing_name"
-        echo "$existing_id"
+        # Return only the clean ID
+        printf "%s" "$existing_id"
         return 0
     fi
     
@@ -773,6 +779,9 @@ EOF
     local http_code=$(echo "$response" | tail -n1)
     local response_body=$(echo "$response" | head -n -1)
     
+    log_message "DEBUG" "Update response HTTP code: $http_code"
+    log_message "DEBUG" "Update response body: $response_body"
+    
     # According to Snipe-IT API docs, they return 200 even on errors
     if [[ $http_code -eq 200 ]]; then
         # Check if the response indicates success or error
@@ -785,6 +794,9 @@ EOF
             log_message "ERROR" "Response: $response_body"
             return 1
         fi
+    elif [[ $http_code -eq 201 ]]; then
+        log_message "SUCCESS" "Asset custom fields updated successfully"
+        return 0
     else
         log_message "ERROR" "Error updating asset custom fields - HTTP Code: $http_code"
         log_message "ERROR" "Response: $response_body"
@@ -1209,26 +1221,20 @@ main() {
     # Check if asset exists
     local existing_asset_id
     if existing_asset_id=$(check_asset_exists "$ASSET_TAG" "$ASSET_NAME"); then
-        if [[ "$FORCE_UPDATE" == "true" ]]; then
-            log_message "INFO" "Asset already exists. Force update enabled, updating custom fields..."
-            
-            # Detect system information (unless disabled) for update
-            if [[ "$NO_AUTO_DETECT" != "true" ]]; then
-                detect_system_info
-            fi
-            
-            # Update custom fields
-            if update_asset_custom_fields "$existing_asset_id"; then
-                log_message "SUCCESS" "Asset custom fields updated successfully"
-                exit 0
-            else
-                log_message "ERROR" "Failed to update asset custom fields"
-                exit 1
-            fi
-        else
-            log_message "WARNING" "Asset already exists. Use --force-update to update custom fields."
-            log_message "INFO" "Stopping script. Asset ID: $existing_asset_id"
+        log_message "INFO" "Asset already exists. Updating custom fields..."
+        
+        # Detect system information (unless disabled) for update
+        if [[ "$NO_AUTO_DETECT" != "true" ]]; then
+            detect_system_info
+        fi
+        
+        # Update custom fields
+        if update_asset_custom_fields "$existing_asset_id"; then
+            log_message "SUCCESS" "Asset custom fields updated successfully"
             exit 0
+        else
+            log_message "ERROR" "Failed to update asset custom fields"
+            exit 1
         fi
     fi
     
