@@ -345,19 +345,37 @@ update_asset_custom_fields() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Build JSON for custom fields update (at root level as per Snipe-IT API docs)
-    local update_data=$(cat << EOF
-{
-    "$DISKS_COLUMN": "$escaped_disks",
-    "$MEMORY_COLUMN": $MEMORY,
-    "$VCPU_COLUMN": $VCPU,
-    "$HOSTNAME_COLUMN": "$escaped_hostname",
-    "$IP_COLUMN": "$escaped_ip",
-    "$OS_COLUMN": "$escaped_os",
-    "$SOFTWARE_COLUMN": "$escaped_software"
-}
-EOF
-)
+    # Build JSON for custom fields update - only include fields we manage
+    local update_data="{}"
+    
+    # Only add fields that have values and are managed by this script
+    if [[ -n "$DISKS" ]]; then
+        update_data=$(echo "$update_data" | jq --arg col "$DISKS_COLUMN" --arg val "$escaped_disks" '. + {($col): $val}')
+    fi
+    
+    if [[ -n "$MEMORY" ]]; then
+        update_data=$(echo "$update_data" | jq --arg col "$MEMORY_COLUMN" --arg val "$MEMORY" '. + {($col): ($val | tonumber)}')
+    fi
+    
+    if [[ -n "$VCPU" ]]; then
+        update_data=$(echo "$update_data" | jq --arg col "$VCPU_COLUMN" --arg val "$VCPU" '. + {($col): ($val | tonumber)}')
+    fi
+    
+    if [[ -n "$HOSTNAME" ]]; then
+        update_data=$(echo "$update_data" | jq --arg col "$HOSTNAME_COLUMN" --arg val "$escaped_hostname" '. + {($col): $val}')
+    fi
+    
+    if [[ -n "$IP_ADDRESS" ]]; then
+        update_data=$(echo "$update_data" | jq --arg col "$IP_COLUMN" --arg val "$escaped_ip" '. + {($col): $val}')
+    fi
+    
+    if [[ -n "$OS" ]]; then
+        update_data=$(echo "$update_data" | jq --arg col "$OS_COLUMN" --arg val "$escaped_os" '. + {($col): $val}')
+    fi
+    
+    if [[ -n "$SOFTWARE" ]]; then
+        update_data=$(echo "$update_data" | jq --arg col "$SOFTWARE_COLUMN" --arg val "$escaped_software" '. + {($col): $val}')
+    fi
     
     # Validate JSON before sending
     if ! echo "$update_data" | jq . >/dev/null 2>&1; then
