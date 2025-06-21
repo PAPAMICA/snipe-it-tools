@@ -375,7 +375,6 @@ update_asset_custom_fields() {
     "$IP_COLUMN": "$escaped_ip",
     "$OS_COLUMN": "$escaped_os",
     "$SOFTWARE_COLUMN": "$escaped_software",
-    "_snipeit_mac_address_1": $(echo "$current_asset" | jq -r '._snipeit_mac_address_1 // null'),
     "_snipeit_documentation_2": $(echo "$current_asset" | jq -r '._snipeit_documentation_2 // null'),
     "_snipeit_supervision_3": $(echo "$current_asset" | jq -r '._snipeit_supervision_3 // null'),
     "_snipeit_teams_11": $(echo "$current_asset" | jq -r '._snipeit_teams_11 // null'),
