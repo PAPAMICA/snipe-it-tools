@@ -311,6 +311,7 @@ validate_server_url() {
 get_model_id() {
     log_message "INFO" "Getting model ID: $MODEL_NAME"
     
+    # Try exact search first
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
@@ -327,6 +328,22 @@ get_model_id() {
     
     local model_id=$(echo "$response" | jq -r '.rows[0].id // empty')
     local model_name=$(echo "$response" | jq -r '.rows[0].name // empty')
+    
+    if [[ -z "$model_id" || "$model_id" == "null" ]]; then
+        # Try without search parameter to get all models
+        log_message "INFO" "Exact search failed, trying to get all models..."
+        response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            "$SNIPEIT_SERVER/api/v1/models?limit=50")
+        
+        if [[ "$VERBOSE" == "true" ]]; then
+            log_message "DEBUG" "All models response: $response"
+        fi
+        
+        model_id=$(echo "$response" | jq -r '.rows[] | select(.name == "'$MODEL_NAME'") | .id' 2>/dev/null | head -1)
+        model_name="$MODEL_NAME"
+    fi
     
     if [[ -z "$model_id" || "$model_id" == "null" ]]; then
         log_message "ERROR" "Model '$MODEL_NAME' not found"
@@ -502,6 +519,19 @@ create_asset() {
     
     log_message "INFO" "Creating asset: $ASSET_NAME"
     
+    # Handle empty values for JSON
+    local company_json="null"
+    [[ -n "$company_id" && "$company_id" != "null" ]] && company_json="$company_id"
+    
+    local location_json="null"
+    [[ -n "$location_id" && "$location_id" != "null" ]] && location_json="$location_id"
+    
+    local department_json="null"
+    [[ -n "$department_id" && "$department_id" != "null" ]] && department_json="$department_id"
+    
+    local supplier_json="null"
+    [[ -n "$supplier_id" && "$supplier_id" != "null" ]] && supplier_json="$supplier_id"
+    
     # Build JSON for asset
     local asset_data=$(cat << EOF
 {
@@ -509,10 +539,10 @@ create_asset() {
     "model_id": $model_id,
     "status_id": 1,
     "asset_tag": "$ASSET_TAG",
-    "company_id": $company_id,
-    "location_id": $location_id,
-    "department_id": $department_id,
-    "supplier_id": $supplier_id,
+    "company_id": $company_json,
+    "location_id": $location_json,
+    "department_id": $department_json,
+    "supplier_id": $supplier_json,
     "purchase_date": "$PURCHASE_DATE",
     "warranty_months": $WARRANTY_MONTHS,
     "order_number": "$ORDER_NUMBER",
@@ -766,7 +796,7 @@ fi
 [[ -z "$DEPARTMENT_NAME" ]] && DEPARTMENT_NAME=""
 [[ -z "$SUPPLIER_NAME" ]] && SUPPLIER_NAME=""
 [[ -z "$PURCHASE_DATE" ]] && PURCHASE_DATE=""
-[[ -z "$WARRANTY_MONTHS" ]] && WARRANTY_MONTHS=""
+[[ -z "$WARRANTY_MONTHS" ]] && WARRANTY_MONTHS="0"
 [[ -z "$ORDER_NUMBER" ]] && ORDER_NUMBER=""
 [[ -z "$INVOICE_NUMBER" ]] && INVOICE_NUMBER=""
 [[ -z "$DISKS" ]] && DISKS=""
@@ -776,6 +806,22 @@ fi
 [[ -z "$IP_ADDRESS" ]] && IP_ADDRESS=""
 [[ -z "$OS" ]] && OS=""
 [[ -z "$SOFTWARE" ]] && SOFTWARE=""
+
+# Validate numeric fields
+if [[ -n "$MEMORY" && ! "$MEMORY" =~ ^[0-9]+$ ]]; then
+    log_message "ERROR" "Memory must be a numeric value"
+    exit 1
+fi
+
+if [[ -n "$VCPU" && ! "$VCPU" =~ ^[0-9]+$ ]]; then
+    log_message "ERROR" "vCPU must be a numeric value"
+    exit 1
+fi
+
+if [[ -n "$WARRANTY_MONTHS" && ! "$WARRANTY_MONTHS" =~ ^[0-9]+$ ]]; then
+    log_message "ERROR" "Warranty months must be a numeric value"
+    exit 1
+fi
 
 # Execute main script
 main "$@"
