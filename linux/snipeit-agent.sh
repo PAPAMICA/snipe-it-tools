@@ -265,7 +265,7 @@ log_message() {
             ;;
         "DEBUG")
             if [[ "$VERBOSE" == "true" ]]; then
-                echo -e "${YELLOW}[$timestamp] DEBUG:${NC} $message"
+                echo -e "${YELLOW}[$timestamp] DEBUG:${NC} $message" >&2
             fi
             ;;
     esac
@@ -379,10 +379,10 @@ get_model_id() {
     fi
     
     # Clean the model_id to ensure it's just a number
-    model_id=$(echo "$model_id" | tr -d '[:space:]')
+    model_id=$(echo "$model_id" | tr -d '[:space:]' | tr -d '\n' | tr -d '\r')
     
     log_message "SUCCESS" "Model found: $model_name (ID: $model_id)"
-    echo "$model_id"
+    printf "%s" "$model_id"
 }
 
 # Function to get company ID
@@ -560,7 +560,15 @@ create_asset() {
     fi
     
     # Clean model_id to ensure it's just a number
-    model_id=$(echo "$model_id" | tr -d '[:space:]')
+    model_id=$(echo "$model_id" | tr -d '[:space:]' | tr -d '\n' | tr -d '\r' | sed 's/[^0-9]//g')
+    
+    # Validate that model_id is a number
+    if ! [[ "$model_id" =~ ^[0-9]+$ ]]; then
+        log_message "ERROR" "Model ID is not a valid number: '$model_id'"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Cleaned model ID: $model_id"
     
     # Handle empty values for JSON
     local company_json="null"
