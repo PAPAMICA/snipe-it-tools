@@ -6,11 +6,6 @@
 
 set -e  # Stop script on error
 
-# Default configuration
-DEFAULT_STATUS="Pending"
-DEFAULT_AUDIT_INTERVAL="1 year"
-DEFAULT_EXPECTED_CHECKIN_INTERVAL="0 days"
-
 # Colors for messages
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -153,7 +148,7 @@ calculate_dates() {
     if command -v date >/dev/null 2>&1; then
         # Try GNU date (Linux standard)
         AUDIT_DATE=$(date -d "+1 year" +%Y-%m-%d 2>/dev/null || echo "")
-        EXPECTED_CHECKIN_DATE=$(date -d "+2 days" +%Y-%m-%d 2>/dev/null || echo "")
+        EXPECTED_CHECKIN_DATE=$(date -d "+0 days" +%Y-%m-%d 2>/dev/null || echo "")
         
         # If GNU date failed, try BSD date (macOS)
         if [[ -z "$AUDIT_DATE" ]]; then
@@ -794,13 +789,8 @@ update_asset_custom_fields() {
     local escaped_ip=$(escape_json_string "$IP_ADDRESS")
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
-    local escaped_asset_name=$(escape_json_string "$ASSET_NAME")
-    local escaped_asset_tag=$(escape_json_string "$ASSET_TAG")
-    local escaped_purchase_date=$(escape_json_string "$PURCHASE_DATE")
-    local escaped_order_number=$(escape_json_string "$ORDER_NUMBER")
-    local escaped_invoice_number=$(escape_json_string "$INVOICE_NUMBER")
     
-    # Build JSON for asset update (include all required fields)
+    # Build JSON for asset update (custom fields at root level as per Snipe-IT API docs)
     local update_data=$(cat << EOF
 {
     "name": "$current_name",
@@ -811,15 +801,13 @@ update_asset_custom_fields() {
     "location_id": $location_json,
     "department_id": $department_json,
     "supplier_id": $supplier_json,
-    "custom_fields": {
-        "$DISKS_COLUMN": "$escaped_disks",
-        "$MEMORY_COLUMN": $MEMORY,
-        "$VCPU_COLUMN": $VCPU,
-        "$HOSTNAME_COLUMN": "$escaped_hostname",
-        "$IP_COLUMN": "$escaped_ip",
-        "$OS_COLUMN": "$escaped_os",
-        "$SOFTWARE_COLUMN": "$escaped_software"
-    }
+    "$DISKS_COLUMN": "$escaped_disks",
+    "$MEMORY_COLUMN": $MEMORY,
+    "$VCPU_COLUMN": $VCPU,
+    "$HOSTNAME_COLUMN": "$escaped_hostname",
+    "$IP_COLUMN": "$escaped_ip",
+    "$OS_COLUMN": "$escaped_os",
+    "$SOFTWARE_COLUMN": "$escaped_software"
 }
 EOF
 )
@@ -907,18 +895,16 @@ update_asset_custom_fields_fallback() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Build JSON for custom fields only update
+    # Build JSON for custom fields only update (at root level as per Snipe-IT API docs)
     local custom_fields_data=$(cat << EOF
 {
-    "custom_fields": {
-        "$DISKS_COLUMN": "$escaped_disks",
-        "$MEMORY_COLUMN": $MEMORY,
-        "$VCPU_COLUMN": $VCPU,
-        "$HOSTNAME_COLUMN": "$escaped_hostname",
-        "$IP_COLUMN": "$escaped_ip",
-        "$OS_COLUMN": "$escaped_os",
-        "$SOFTWARE_COLUMN": "$escaped_software"
-    }
+    "$DISKS_COLUMN": "$escaped_disks",
+    "$MEMORY_COLUMN": $MEMORY,
+    "$VCPU_COLUMN": $VCPU,
+    "$HOSTNAME_COLUMN": "$escaped_hostname",
+    "$IP_COLUMN": "$escaped_ip",
+    "$OS_COLUMN": "$escaped_os",
+    "$SOFTWARE_COLUMN": "$escaped_software"
 }
 EOF
 )
@@ -1046,15 +1032,13 @@ create_asset() {
     "invoice_number": "$escaped_invoice_number",
     "next_audit_date": "$AUDIT_DATE",
     "expected_checkin": "$EXPECTED_CHECKIN_DATE",
-    "custom_fields": {
-        "$DISKS_COLUMN": "$escaped_disks",
-        "$MEMORY_COLUMN": $MEMORY,
-        "$VCPU_COLUMN": $VCPU,
-        "$HOSTNAME_COLUMN": "$escaped_hostname",
-        "$IP_COLUMN": "$escaped_ip",
-        "$OS_COLUMN": "$escaped_os",
-        "$SOFTWARE_COLUMN": "$escaped_software"
-    }
+    "$DISKS_COLUMN": "$escaped_disks",
+    "$MEMORY_COLUMN": $MEMORY,
+    "$VCPU_COLUMN": $VCPU,
+    "$HOSTNAME_COLUMN": "$escaped_hostname",
+    "$IP_COLUMN": "$escaped_ip",
+    "$OS_COLUMN": "$escaped_os",
+    "$SOFTWARE_COLUMN": "$escaped_software"
 }
 EOF
 )
