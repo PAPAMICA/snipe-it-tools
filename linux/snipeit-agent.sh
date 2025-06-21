@@ -537,14 +537,47 @@ check_asset_exists() {
     return 1
 }
 
+# Function to test API endpoint
+test_api_endpoint() {
+    local endpoint="$1"
+    local description="$2"
+    
+    log_message "DEBUG" "Testing API endpoint: $endpoint ($description)"
+    
+    local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER$endpoint")
+    
+    local http_code=$(echo "$response" | tail -n1)
+    local response_body=$(echo "$response" | head -n -1)
+    
+    log_message "DEBUG" "HTTP Code: $http_code"
+    log_message "DEBUG" "Response: $response_body"
+    
+    if [[ $http_code -eq 200 ]]; then
+        log_message "DEBUG" "Endpoint $endpoint is accessible"
+        return 0
+    else
+        log_message "DEBUG" "Endpoint $endpoint returned HTTP $http_code"
+        return 1
+    fi
+}
+
 # Function to get custom field column names
 get_custom_field_columns() {
     log_message "INFO" "Getting custom field column names..."
     
+    # Test the endpoint first
+    if ! test_api_endpoint "/api/v1/fields" "custom fields"; then
+        log_message "WARNING" "Custom fields endpoint not accessible, using default column names"
+        return 1
+    fi
+    
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/customfields")
+        "$SNIPEIT_SERVER/api/v1/fields")
     
     if [[ $? -ne 0 ]]; then
         log_message "WARNING" "Error getting custom fields, using default column names"
@@ -646,6 +679,54 @@ get_custom_field_columns_from_models() {
     
     log_message "WARNING" "No custom fields found in models endpoint"
     return 1
+}
+
+# Function to get custom field information from existing asset
+get_custom_fields_from_existing_asset() {
+    log_message "INFO" "Trying to get custom field information from existing assets..."
+    
+    # Get a list of assets to find one with custom fields
+    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/hardware?limit=1")
+    
+    if [[ $? -ne 0 ]]; then
+        log_message "WARNING" "Error getting assets for custom field analysis"
+        return 1
+    fi
+    
+    local asset_id=$(echo "$response" | jq -r '.rows[0].id // empty')
+    if [[ -z "$asset_id" || "$asset_id" == "null" ]]; then
+        log_message "WARNING" "No assets found for custom field analysis"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Analyzing asset ID: $asset_id for custom fields"
+    
+    # Get the specific asset
+    local asset_response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
+    
+    if [[ $? -ne 0 ]]; then
+        log_message "WARNING" "Error getting asset details"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Asset details: $asset_response"
+    
+    # Extract custom fields from the asset
+    local custom_fields=$(echo "$asset_response" | jq -r '.custom_fields // empty')
+    if [[ -n "$custom_fields" && "$custom_fields" != "null" ]]; then
+        log_message "DEBUG" "Found custom fields in asset: $custom_fields"
+        log_message "DEBUG" "Custom field keys: $(echo "$custom_fields" | jq -r 'keys[] // empty')"
+        return 0
+    else
+        log_message "DEBUG" "No custom fields found in asset"
+        return 1
+    fi
 }
 
 # Function to update asset custom fields
@@ -972,6 +1053,10 @@ main() {
         if [[ $? -ne 0 ]]; then
             log_message "INFO" "Trying alternative method to get custom field columns..."
             get_custom_field_columns_from_models
+            if [[ $? -ne 0 ]]; then
+                log_message "INFO" "Trying to analyze existing assets for custom fields..."
+                get_custom_fields_from_existing_asset
+            fi
         fi
     else
         log_message "INFO" "Skipping custom field column name retrieval (using defaults)"
