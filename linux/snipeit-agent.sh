@@ -2,7 +2,7 @@
 
 # SnipeIT Asset Creation Script
 # Script to create assets in SnipeIT with custom fields management
-# Compatible with all Linux systems (Debian and CentOS based)
+# Compatible with all Linux systems
 
 set -e  # Stop script on error
 
@@ -12,245 +12,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
-
-# Global variables for system detection
-OS_TYPE=""
-PACKAGE_MANAGER=""
-INSTALL_CMD=""
-
-# Function to detect operating system
-detect_os() {
-    log_message "INFO" "Detecting operating system..."
-    
-    # Detection based on system files
-    if [[ -f /etc/os-release ]]; then
-        source /etc/os-release
-        OS_TYPE="$ID"
-        log_message "INFO" "System detected: $NAME ($VERSION)"
-    elif [[ -f /etc/redhat-release ]]; then
-        OS_TYPE="rhel"
-        log_message "INFO" "System detected: Red Hat Enterprise Linux"
-    elif [[ -f /etc/debian_version ]]; then
-        OS_TYPE="debian"
-        log_message "INFO" "System detected: Debian"
-    else
-        log_message "WARNING" "Unable to detect system, using default values"
-        OS_TYPE="unknown"
-    fi
-    
-    # Determine package manager
-    case $OS_TYPE in
-        "ubuntu"|"debian"|"linuxmint"|"pop")
-            PACKAGE_MANAGER="apt"
-            INSTALL_CMD="apt-get install -y"
-            log_message "INFO" "Package manager: APT"
-            ;;
-        "centos"|"rhel"|"fedora"|"rocky"|"alma"|"amzn")
-            PACKAGE_MANAGER="yum"
-            # Check if dnf is available (newer)
-            if command -v dnf >/dev/null 2>&1; then
-                PACKAGE_MANAGER="dnf"
-                INSTALL_CMD="dnf install -y"
-            else
-                INSTALL_CMD="yum install -y"
-            fi
-            log_message "INFO" "Package manager: $PACKAGE_MANAGER"
-            ;;
-        "opensuse"|"sles")
-            PACKAGE_MANAGER="zypper"
-            INSTALL_CMD="zypper install -y"
-            log_message "INFO" "Package manager: Zypper"
-            ;;
-        "arch"|"manjaro")
-            PACKAGE_MANAGER="pacman"
-            INSTALL_CMD="pacman -S --noconfirm"
-            log_message "INFO" "Package manager: Pacman"
-            ;;
-        *)
-            log_message "WARNING" "Unrecognized system, trying APT then YUM"
-            PACKAGE_MANAGER="auto"
-            ;;
-    esac
-}
-
-# Function to install dependencies
-install_dependencies() {
-    log_message "INFO" "Checking and installing dependencies..."
-    
-    local missing_deps=()
-    
-    # Check curl
-    if ! command -v curl >/dev/null 2>&1; then
-        missing_deps+=("curl")
-    fi
-    
-    # Check jq
-    if ! command -v jq >/dev/null 2>&1; then
-        missing_deps+=("jq")
-    fi
-    
-    # If dependencies are missing, install them
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        log_message "INFO" "Missing dependencies: ${missing_deps[*]}"
-        log_message "INFO" "Automatic installation..."
-        
-        case $PACKAGE_MANAGER in
-            "apt")
-                sudo apt-get update
-                sudo $INSTALL_CMD "${missing_deps[@]}"
-                ;;
-            "yum"|"dnf")
-                sudo $INSTALL_CMD "${missing_deps[@]}"
-                ;;
-            "zypper")
-                sudo $INSTALL_CMD "${missing_deps[@]}"
-                ;;
-            "pacman")
-                sudo $INSTALL_CMD "${missing_deps[@]}"
-                ;;
-            "auto")
-                # Try APT first, then YUM
-                if command -v apt-get >/dev/null 2>&1; then
-                    sudo apt-get update
-                    sudo apt-get install -y "${missing_deps[@]}" 2>/dev/null || {
-                        log_message "WARNING" "APT failed, trying YUM..."
-                        sudo yum install -y "${missing_deps[@]}" 2>/dev/null || {
-                            log_message "ERROR" "Unable to install dependencies automatically"
-                            log_message "INFO" "Please install manually: ${missing_deps[*]}"
-                            return 1
-                        }
-                    }
-                elif command -v yum >/dev/null 2>&1; then
-                    sudo yum install -y "${missing_deps[@]}" 2>/dev/null || {
-                        log_message "ERROR" "Unable to install dependencies automatically"
-                        log_message "INFO" "Please install manually: ${missing_deps[*]}"
-                        return 1
-                    }
-                else
-                    log_message "ERROR" "No recognized package manager"
-                    log_message "INFO" "Please install manually: ${missing_deps[*]}"
-                    return 1
-                fi
-                ;;
-        esac
-        
-        log_message "SUCCESS" "Dependencies installed successfully"
-    else
-        log_message "SUCCESS" "All dependencies are already installed"
-    fi
-}
-
-# Function to calculate dates (multi-OS compatible)
-calculate_dates() {
-    log_message "INFO" "Calculating dates..."
-    
-    # Try different methods depending on the system
-    if command -v date >/dev/null 2>&1; then
-        # Try GNU date (Linux standard)
-        AUDIT_DATE=$(date -d "+1 year" +%Y-%m-%d 2>/dev/null || echo "")
-        EXPECTED_CHECKIN_DATE=$(date -d "+0 days" +%Y-%m-%d 2>/dev/null || echo "")
-        
-        # If GNU date failed, try BSD date (macOS)
-        if [[ -z "$AUDIT_DATE" ]]; then
-            AUDIT_DATE=$(date -v+1y +%Y-%m-%d 2>/dev/null || echo "")
-            EXPECTED_CHECKIN_DATE=$(date -v+2d +%Y-%m-%d 2>/dev/null || echo "")
-        fi
-        
-        # If everything failed, use current date
-        if [[ -z "$AUDIT_DATE" ]]; then
-            AUDIT_DATE=$(date +%Y-%m-%d)
-            EXPECTED_CHECKIN_DATE=$(date +%Y-%m-%d)
-            log_message "WARNING" "Unable to calculate future dates, using current date"
-        fi
-    else
-        log_message "WARNING" "Command 'date' not found"
-        AUDIT_DATE=$(date +%Y-%m-%d)
-        EXPECTED_CHECKIN_DATE=$(date +%Y-%m-%d)
-    fi
-    
-    log_message "INFO" "Audit date: $AUDIT_DATE"
-    log_message "INFO" "Expected check-in date: $EXPECTED_CHECKIN_DATE"
-}
-
-# Function to display help messages
-show_help() {
-    cat << EOF
-Usage: $0 [OPTIONS]
-
-Script to create assets in SnipeIT
-Compatible with all Linux systems (Debian, CentOS, Ubuntu, RHEL, etc.)
-
-OPTIONS:
-    -s, --server URL        SnipeIT server URL (required)
-    -t, --token TOKEN       SnipeIT API token (required)
-    -m, --model MODEL       Asset model name (required)
-    -n, --name NAME         Asset name (optional, defaults to hostname)
-    -a, --asset-tag TAG     Asset tag (optional)
-    -c, --company COMPANY   Company name (optional)
-    -l, --location LOCATION Location name (optional)
-    -d, --department DEPT   Department name (optional)
-    -u, --supplier SUPPLIER Supplier name (optional)
-    -p, --purchase-date DATE Purchase date (YYYY-MM-DD, optional)
-    -w, --warranty-months MONTHS Warranty months (optional)
-    -o, --order-number ORDER Order number (optional)
-    -i, --invoice-number INVOICE Invoice number (optional)
-    --auto-install          Automatic dependency installation (curl, jq)
-    --no-auto-detect        Disable automatic system information detection
-    --no-custom-fields      Skip custom field column name retrieval (use defaults)
-    --force-custom-fields   Force update custom fields even if not associated with model
-    --force-update          Force update of existing assets (legacy option, no longer needed)
-    -v, --verbose           Verbose mode
-    -h, --help             Show this help
-
-CUSTOM FIELDS:
-    --disks DISKS           Disk(s) (textarea)
-    --memory MEMORY         Memory in GB (numeric)
-    --vcpu VCPU             vCPU (numeric)
-    --hostname HOSTNAME     Hostname (text)
-    --ip-address IP         IP address (text)
-    --os OS                 Operating system (text)
-    --software SOFTWARE     Software (textarea)
-
-AUTO-DETECTION:
-    The script automatically detects system information if not provided:
-    - CPU cores (vCPU)
-    - Memory (RAM) in GB
-    - Disk information
-    - Operating system
-    - IP address
-    - Hostname
-
-ASSET UPDATES:
-    If an asset with the same name or asset tag already exists, the script will
-    automatically update its custom fields with the latest system information.
-    No additional options are required for updates.
-
-SUPPORTED SYSTEMS:
-    - Ubuntu, Debian, Linux Mint, Pop!_OS (APT)
-    - CentOS, RHEL, Fedora, Rocky Linux, AlmaLinux (YUM/DNF)
-    - openSUSE, SLES (Zypper)
-    - Arch Linux, Manjaro (Pacman)
-    - Other Linux distributions
-
-EXAMPLES:
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell OptiPlex 7090" -n "PC-001" --hostname "pc001.company.com" --ip-address "192.168.1.100" --memory 16 --vcpu 8 --os "Ubuntu 22.04"
-
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "HP ProBook 450" -n "LAPTOP-001" --hostname "laptop001.company.com" --ip-address "192.168.1.101" --memory 32 --vcpu 16 --os "Windows 11" --disks "SSD 512GB" --software "Office 365, Chrome, Firefox"
-
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell PowerEdge R740" --hostname "srv-prod-01.company.com" --auto-install
-
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell PowerEdge R740" --auto-install
-
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-auto-detect
-
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell OptiPlex 7090" --hostname "pc001.company.com" --ip-address "192.168.1.100"
-
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-custom-fields --no-auto-detect
-
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --force-custom-fields
-
-EOF
-}
 
 # Function to log messages
 log_message() {
@@ -280,810 +41,11 @@ log_message() {
     esac
 }
 
-# Function to validate required parameters
-validate_required_params() {
-    local missing_params=()
-    
-    [[ -z "$SNIPEIT_SERVER" ]] && missing_params+=("SnipeIT server")
-    [[ -z "$API_TOKEN" ]] && missing_params+=("API token")
-    [[ -z "$MODEL_NAME" ]] && missing_params+=("model name")
-    
-    if [[ ${#missing_params[@]} -gt 0 ]]; then
-        log_message "ERROR" "Missing parameters: ${missing_params[*]}"
-        echo
-        show_help
-        exit 1
-    fi
-}
-
-# Function to set default asset name based on hostname
-set_default_asset_name() {
-    if [[ -z "$ASSET_NAME" ]]; then
-        if [[ -n "$HOSTNAME" ]]; then
-            ASSET_NAME="$HOSTNAME"
-            log_message "INFO" "Using hostname as asset name: $ASSET_NAME"
-        else
-            # Try to get hostname from system
-            local system_hostname=$(hostname 2>/dev/null || echo "")
-            if [[ -n "$system_hostname" ]]; then
-                ASSET_NAME="$system_hostname"
-                log_message "INFO" "Using system hostname as asset name: $ASSET_NAME"
-            else
-                log_message "ERROR" "No asset name provided and unable to determine hostname"
-                log_message "INFO" "Please provide an asset name with --name option or hostname with --hostname option"
-                exit 1
-            fi
-        fi
-    fi
-}
-
-# Function to validate server URL
-validate_server_url() {
-    if [[ ! "$SNIPEIT_SERVER" =~ ^https?:// ]]; then
-        log_message "ERROR" "Server URL must start with http:// or https://"
-        exit 1
-    fi
-    
-    # Remove trailing slash if exists
-    SNIPEIT_SERVER=${SNIPEIT_SERVER%/}
-}
-
-# Function to get model ID
-get_model_id() {
-    local model_name="$1"
-    
-    # Try exact search first
-    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/models?search=$model_name&limit=10")
-    
-    if [[ $? -ne 0 ]]; then
-        return 1
-    fi
-    
-    local model_id=$(echo "$response" | jq -r '.rows[0].id // empty')
-    local model_name_found=$(echo "$response" | jq -r '.rows[0].name // empty')
-    
-    if [[ -z "$model_id" || "$model_id" == "null" ]]; then
-        # Try without search parameter to get all models
-        response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-            -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
-            "$SNIPEIT_SERVER/api/v1/models?limit=50")
-        
-        if [[ $? -ne 0 ]]; then
-            return 1
-        fi
-        
-        # Use jq to find exact match
-        model_id=$(echo "$response" | jq -r --arg name "$model_name" '.rows[] | select(.name == $name) | .id' 2>/dev/null | head -1)
-        model_name_found="$model_name"
-    fi
-    
-    if [[ -z "$model_id" || "$model_id" == "null" ]]; then
-        return 1
-    fi
-    
-    # Return only the clean model ID
-    printf "%s" "$model_id"
-}
-
-# Function to get model ID with logging (wrapper)
-get_model_id_with_logging() {
-    local model_name="$1"
-    
-    log_message "INFO" "Getting model ID: $model_name"
-    
-    # Get the model ID without any logging
-    local model_id=$(get_model_id "$model_name")
-    if [[ $? -ne 0 || -z "$model_id" ]]; then
-        log_message "ERROR" "Model '$model_name' not found"
-        return 1
-    fi
-    
-    log_message "SUCCESS" "Model found: $model_name (ID: $model_id)"
-    printf "%s" "$model_id"
-}
-
-# Function to get company ID
-get_company_id() {
-    if [[ -z "$COMPANY_NAME" ]]; then
-        return 0
-    fi
-    
-    log_message "INFO" "Getting company ID: $COMPANY_NAME"
-    
-    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/companies?search=$COMPANY_NAME&limit=1")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting company"
-        return 0
-    fi
-    
-    local company_id=$(echo "$response" | jq -r '.rows[0].id // empty')
-    
-    if [[ -z "$company_id" || "$company_id" == "null" ]]; then
-        log_message "WARNING" "Company '$COMPANY_NAME' not found"
-        return 0
-    fi
-    
-    log_message "SUCCESS" "Company found with ID: $company_id"
-    echo "$company_id"
-}
-
-# Function to get location ID
-get_location_id() {
-    if [[ -z "$LOCATION_NAME" ]]; then
-        return 0
-    fi
-    
-    log_message "INFO" "Getting location ID: $LOCATION_NAME"
-    
-    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/locations?search=$LOCATION_NAME&limit=1")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting location"
-        return 0
-    fi
-    
-    local location_id=$(echo "$response" | jq -r '.rows[0].id // empty')
-    
-    if [[ -z "$location_id" || "$location_id" == "null" ]]; then
-        log_message "WARNING" "Location '$LOCATION_NAME' not found"
-        return 0
-    fi
-    
-    log_message "SUCCESS" "Location found with ID: $location_id"
-    echo "$location_id"
-}
-
-# Function to get department ID
-get_department_id() {
-    if [[ -z "$DEPARTMENT_NAME" ]]; then
-        return 0
-    fi
-    
-    log_message "INFO" "Getting department ID: $DEPARTMENT_NAME"
-    
-    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/departments?search=$DEPARTMENT_NAME&limit=1")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting department"
-        return 0
-    fi
-    
-    local department_id=$(echo "$response" | jq -r '.rows[0].id // empty')
-    
-    if [[ -z "$department_id" || "$department_id" == "null" ]]; then
-        log_message "WARNING" "Department '$DEPARTMENT_NAME' not found"
-        return 0
-    fi
-    
-    log_message "SUCCESS" "Department found with ID: $department_id"
-    echo "$department_id"
-}
-
-# Function to get supplier ID
-get_supplier_id() {
-    if [[ -z "$SUPPLIER_NAME" ]]; then
-        return 0
-    fi
-    
-    log_message "INFO" "Getting supplier ID: $SUPPLIER_NAME"
-    
-    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/suppliers?search=$SUPPLIER_NAME&limit=1")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting supplier"
-        return 0
-    fi
-    
-    local supplier_id=$(echo "$response" | jq -r '.rows[0].id // empty')
-    
-    if [[ -z "$supplier_id" || "$supplier_id" == "null" ]]; then
-        log_message "WARNING" "Supplier '$SUPPLIER_NAME' not found"
-        return 0
-    fi
-    
-    log_message "SUCCESS" "Supplier found with ID: $supplier_id"
-    echo "$supplier_id"
-}
-
-# Function to check if asset already exists
-check_asset_exists() {
-    local asset_tag="$1"
-    local asset_name="$2"
-    
-    log_message "INFO" "Checking if asset exists"
-    
-    local search_term=""
-    if [[ -n "$asset_tag" ]]; then
-        search_term="$asset_tag"
-    else
-        search_term="$asset_name"
-    fi
-    
-    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/hardware?search=$search_term&limit=1")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error checking if asset exists"
-        return 1
-    fi
-    
-    local existing_asset=$(echo "$response" | jq -r '.rows[0] // empty')
-    
-    if [[ -n "$existing_asset" && "$existing_asset" != "null" ]]; then
-        local existing_id=$(echo "$existing_asset" | jq -r '.id')
-        local existing_name=$(echo "$existing_asset" | jq -r '.name')
-        log_message "INFO" "Existing asset found - ID: $existing_id, Name: $existing_name"
-        # Store the ID in a global variable to avoid printf issues
-        ASSET_ID_TO_UPDATE="$existing_id"
-        return 0
-    fi
-    
-    log_message "INFO" "No existing asset found"
-    return 1
-}
-
-# Function to test API endpoint
-test_api_endpoint() {
-    local endpoint="$1"
-    local description="$2"
-    
-    log_message "DEBUG" "Testing API endpoint: $endpoint ($description)"
-    
-    local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER$endpoint")
-    
-    local http_code=$(echo "$response" | tail -n1)
-    local response_body=$(echo "$response" | head -n -1)
-    
-    log_message "DEBUG" "HTTP Code: $http_code"
-    log_message "DEBUG" "Response: $response_body"
-    
-    if [[ $http_code -eq 200 ]]; then
-        log_message "DEBUG" "Endpoint $endpoint is accessible"
-        return 0
-    else
-        log_message "DEBUG" "Endpoint $endpoint returned HTTP $http_code"
-        return 1
-    fi
-}
-
-# Function to get custom field column names
-get_custom_field_columns() {
-    log_message "INFO" "Getting custom field column names..."
-    
-    # Test the endpoint first
-    if ! test_api_endpoint "/api/v1/fields" "custom fields"; then
-        log_message "WARNING" "Custom fields endpoint not accessible, using default column names"
-        return 1
-    fi
-    
-    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/fields")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting custom fields, using default column names"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Custom fields API response: $response"
-    
-    # Try different response formats
-    local fields_json=""
-    
-    # Try .rows format first
-    fields_json=$(echo "$response" | jq -r '.rows // empty')
-    if [[ -n "$fields_json" && "$fields_json" != "null" ]]; then
-        log_message "DEBUG" "Found custom fields in .rows format"
-    else
-        # Try direct array format
-        fields_json=$(echo "$response" | jq -r '. // empty')
-        if [[ -n "$fields_json" && "$fields_json" != "null" ]]; then
-            log_message "DEBUG" "Found custom fields in direct array format"
-        else
-            # Try .data format
-            fields_json=$(echo "$response" | jq -r '.data // empty')
-            if [[ -n "$fields_json" && "$fields_json" != "null" ]]; then
-                log_message "DEBUG" "Found custom fields in .data format"
-            else
-                log_message "WARNING" "No custom fields found in any format, using default column names"
-                log_message "DEBUG" "Response structure: $(echo "$response" | jq -r 'keys // empty')"
-                return 1
-            fi
-        fi
-    fi
-    
-    # Check if fields_json is an array
-    local is_array=$(echo "$fields_json" | jq -r 'if type == "array" then "true" else "false" end')
-    if [[ "$is_array" != "true" ]]; then
-        log_message "WARNING" "Custom fields response is not an array, using default column names"
-        log_message "DEBUG" "Fields JSON type: $(echo "$fields_json" | jq -r 'type')"
-        return 1
-    fi
-    
-    # List all available custom fields for debugging
-    log_message "DEBUG" "Available custom fields:"
-    echo "$fields_json" | jq -r '.[] | "  - \(.name) (db_column: \(.db_column_name // "null"))"' >&2
-    
-    # Extract column names for our fields
-    DISKS_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Disque(s)") | .db_column_name // empty')
-    MEMORY_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Mémoire") | .db_column_name // empty')
-    VCPU_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "vCPU") | .db_column_name // empty')
-    HOSTNAME_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Hostname") | .db_column_name // empty')
-    IP_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Adresse IP") | .db_column_name // empty')
-    OS_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "OS") | .db_column_name // empty')
-    SOFTWARE_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Logiciels") | .db_column_name // empty')
-    
-    # Set defaults if not found
-    [[ -z "$DISKS_COLUMN" ]] && DISKS_COLUMN="_snipeit_disques_10"
-    [[ -z "$MEMORY_COLUMN" ]] && MEMORY_COLUMN="_snipeit_memoire_9"
-    [[ -z "$VCPU_COLUMN" ]] && VCPU_COLUMN="_snipeit_vcpu_8"
-    [[ -z "$HOSTNAME_COLUMN" ]] && HOSTNAME_COLUMN="_snipeit_hostname_7"
-    [[ -z "$IP_COLUMN" ]] && IP_COLUMN="_snipeit_adresse_ip_6"
-    [[ -z "$OS_COLUMN" ]] && OS_COLUMN="_snipeit_os_4"
-    [[ -z "$SOFTWARE_COLUMN" ]] && SOFTWARE_COLUMN="_snipeit_logiciels_5"
-    
-    log_message "DEBUG" "Custom field columns:"
-    log_message "DEBUG" "  Disks: $DISKS_COLUMN"
-    log_message "DEBUG" "  Memory: $MEMORY_COLUMN"
-    log_message "DEBUG" "  vCPU: $VCPU_COLUMN"
-    log_message "DEBUG" "  Hostname: $HOSTNAME_COLUMN"
-    log_message "DEBUG" "  IP: $IP_COLUMN"
-    log_message "DEBUG" "  OS: $OS_COLUMN"
-    log_message "DEBUG" "  Software: $SOFTWARE_COLUMN"
-}
-
-# Function to get custom field column names from models endpoint (fallback)
-get_custom_field_columns_from_models() {
-    log_message "INFO" "Trying to get custom field column names from models endpoint..."
-    
-    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/models?limit=1")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting models for custom fields"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Models API response for custom fields: $response"
-    
-    # Try to extract custom fields from the first model
-    local model_fields=$(echo "$response" | jq -r '.rows[0].fieldset // empty')
-    if [[ -n "$model_fields" && "$model_fields" != "null" ]]; then
-        log_message "DEBUG" "Found custom fields in model fieldset: $model_fields"
-        
-        # Parse the fieldset to get custom field information
-        # This is a more complex approach and may need adjustment based on actual API response
-        return 0
-    fi
-    
-    log_message "WARNING" "No custom fields found in models endpoint"
-    return 1
-}
-
-# Function to get custom field information from existing asset
-get_custom_fields_from_existing_asset() {
-    log_message "INFO" "Trying to get custom field information from existing assets..."
-    
-    # Get a list of assets to find one with custom fields
-    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/hardware?limit=1")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting assets for custom field analysis"
-        return 1
-    fi
-    
-    local asset_id=$(echo "$response" | jq -r '.rows[0].id // empty')
-    if [[ -z "$asset_id" || "$asset_id" == "null" ]]; then
-        log_message "WARNING" "No assets found for custom field analysis"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Analyzing asset ID: $asset_id for custom fields"
-    
-    # Get the specific asset
-    local asset_response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting asset details"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Asset details: $asset_response"
-    
-    # Extract custom fields from the asset
-    local custom_fields=$(echo "$asset_response" | jq -r '.custom_fields // empty')
-    if [[ -n "$custom_fields" && "$custom_fields" != "null" ]]; then
-        log_message "DEBUG" "Found custom fields in asset: $custom_fields"
-        log_message "DEBUG" "Custom field keys: $(echo "$custom_fields" | jq -r 'keys[] // empty')"
-        return 0
-    else
-        log_message "DEBUG" "No custom fields found in asset"
-        return 1
-    fi
-}
-
 # Function to escape JSON strings
 escape_json_string() {
     local string="$1"
     # Escape backslashes, quotes, and newlines
     echo "$string" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\n/\\n/g' | sed 's/\r/\\r/g' | sed 's/\t/\\t/g'
-}
-
-# Function to update asset custom fields
-update_asset_custom_fields() {
-    local asset_id="$1"
-    
-    log_message "INFO" "Updating custom fields for asset ID: $asset_id"
-    
-    # First, get the current asset data to ensure we have all required fields
-    log_message "DEBUG" "Getting current asset data for ID: $asset_id"
-    local current_asset_response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "ERROR" "Failed to get current asset data"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Current asset response: $current_asset_response"
-    
-    # Extract current asset data
-    local current_name=$(echo "$current_asset_response" | jq -r '.name // empty')
-    local current_model_id=$(echo "$current_asset_response" | jq -r '.model_id // empty')
-    local current_status_id=$(echo "$current_asset_response" | jq -r '.status_id // empty')
-    local current_asset_tag=$(echo "$current_asset_response" | jq -r '.asset_tag // empty')
-    local current_company_id=$(echo "$current_asset_response" | jq -r '.company_id // empty')
-    local current_location_id=$(echo "$current_asset_response" | jq -r '.location_id // empty')
-    local current_department_id=$(echo "$current_asset_response" | jq -r '.department_id // empty')
-    local current_supplier_id=$(echo "$current_asset_response" | jq -r '.supplier_id // empty')
-    
-    # Handle null values for JSON
-    local company_json="null"
-    [[ -n "$current_company_id" && "$current_company_id" != "null" ]] && company_json="$current_company_id"
-    
-    local location_json="null"
-    [[ -n "$current_location_id" && "$current_location_id" != "null" ]] && location_json="$current_location_id"
-    
-    local department_json="null"
-    [[ -n "$current_department_id" && "$current_department_id" != "null" ]] && department_json="$current_department_id"
-    
-    local supplier_json="null"
-    [[ -n "$current_supplier_id" && "$current_supplier_id" != "null" ]] && supplier_json="$current_supplier_id"
-    
-    # Escape custom field values for JSON
-    local escaped_disks=$(escape_json_string "$DISKS")
-    local escaped_hostname=$(escape_json_string "$HOSTNAME")
-    local escaped_ip=$(escape_json_string "$IP_ADDRESS")
-    local escaped_os=$(escape_json_string "$OS")
-    local escaped_software=$(escape_json_string "$SOFTWARE")
-    
-    # Build JSON for asset update (custom fields at root level as per Snipe-IT API docs)
-    local update_data=$(cat << EOF
-{
-    "name": "$current_name",
-    "model_id": $current_model_id,
-    "status_id": $current_status_id,
-    "asset_tag": "$current_asset_tag",
-    "company_id": $company_json,
-    "location_id": $location_json,
-    "department_id": $department_json,
-    "supplier_id": $supplier_json,
-    "$DISKS_COLUMN": "$escaped_disks",
-    "$MEMORY_COLUMN": $MEMORY,
-    "$VCPU_COLUMN": $VCPU,
-    "$HOSTNAME_COLUMN": "$escaped_hostname",
-    "$IP_COLUMN": "$escaped_ip",
-    "$OS_COLUMN": "$escaped_os",
-    "$SOFTWARE_COLUMN": "$escaped_software"
-}
-EOF
-)
-    
-    # Validate JSON before sending
-    if ! echo "$update_data" | jq . >/dev/null 2>&1; then
-        log_message "ERROR" "Invalid JSON generated for asset update:"
-        log_message "ERROR" "$update_data"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Asset update data: $update_data"
-    
-    # Make the update request with better error handling
-    log_message "DEBUG" "Making PUT request to: $SNIPEIT_SERVER/api/v1/hardware/$asset_id"
-    
-    local response=$(curl -s -w "\n%{http_code}" \
-        -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        -X PUT \
-        -d "$update_data" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id" 2>&1)
-    
-    local curl_exit_code=$?
-    
-    if [[ $curl_exit_code -ne 0 ]]; then
-        log_message "ERROR" "Curl command failed with exit code: $curl_exit_code"
-        log_message "ERROR" "Curl error output: $response"
-        return 1
-    fi
-    
-    local http_code=$(echo "$response" | tail -n1)
-    local response_body=$(echo "$response" | head -n -1)
-    
-    log_message "DEBUG" "Update response HTTP code: $http_code"
-    log_message "DEBUG" "Update response body: $response_body"
-    
-    # Check HTTP response codes
-    if [[ $http_code -eq 200 ]]; then
-        # Check if the response indicates success or error
-        local status=$(echo "$response_body" | jq -r '.status // empty')
-        if [[ "$status" == "success" ]]; then
-            log_message "SUCCESS" "Asset custom fields updated successfully"
-            return 0
-        else
-            local error_message=$(echo "$response_body" | jq -r '.messages // .message // "Unknown error"')
-            log_message "ERROR" "API returned error status: $status"
-            log_message "ERROR" "Error message: $error_message"
-            log_message "ERROR" "Full response: $response_body"
-            return 1
-        fi
-    elif [[ $http_code -eq 201 ]]; then
-        log_message "SUCCESS" "Asset custom fields updated successfully"
-        return 0
-    elif [[ $http_code -eq 422 ]]; then
-        log_message "ERROR" "Validation error (HTTP 422)"
-        log_message "ERROR" "Response: $response_body"
-        return 1
-    elif [[ $http_code -eq 404 ]]; then
-        log_message "ERROR" "Asset not found (HTTP 404)"
-        log_message "ERROR" "Response: $response_body"
-        return 1
-    elif [[ $http_code -eq 401 ]]; then
-        log_message "ERROR" "Unauthorized (HTTP 401) - Check API token"
-        log_message "ERROR" "Response: $response_body"
-        return 1
-    else
-        log_message "ERROR" "Error updating asset custom fields - HTTP Code: $http_code"
-        log_message "ERROR" "Response: $response_body"
-        return 1
-    fi
-}
-
-# Function to update asset custom fields (fallback method)
-update_asset_custom_fields_fallback() {
-    local asset_id="$1"
-    
-    log_message "INFO" "Trying fallback method: updating only custom fields for asset ID: $asset_id"
-    
-    # Escape custom field values for JSON
-    local escaped_disks=$(escape_json_string "$DISKS")
-    local escaped_hostname=$(escape_json_string "$HOSTNAME")
-    local escaped_ip=$(escape_json_string "$IP_ADDRESS")
-    local escaped_os=$(escape_json_string "$OS")
-    local escaped_software=$(escape_json_string "$SOFTWARE")
-    
-    # Build JSON for custom fields only update (at root level as per Snipe-IT API docs)
-    local custom_fields_data=$(cat << EOF
-{
-    "$DISKS_COLUMN": "$escaped_disks",
-    "$MEMORY_COLUMN": $MEMORY,
-    "$VCPU_COLUMN": $VCPU,
-    "$HOSTNAME_COLUMN": "$escaped_hostname",
-    "$IP_COLUMN": "$escaped_ip",
-    "$OS_COLUMN": "$escaped_os",
-    "$SOFTWARE_COLUMN": "$escaped_software"
-}
-EOF
-)
-    
-    # Validate JSON before sending
-    if ! echo "$custom_fields_data" | jq . >/dev/null 2>&1; then
-        log_message "ERROR" "Invalid JSON generated for custom fields update:"
-        log_message "ERROR" "$custom_fields_data"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Custom fields only update data: $custom_fields_data"
-    
-    local response=$(curl -s -w "\n%{http_code}" \
-        -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        -X PUT \
-        -d "$custom_fields_data" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id" 2>&1)
-    
-    local curl_exit_code=$?
-    
-    if [[ $curl_exit_code -ne 0 ]]; then
-        log_message "ERROR" "Curl command failed with exit code: $curl_exit_code"
-        log_message "ERROR" "Curl error output: $response"
-        return 1
-    fi
-    
-    local http_code=$(echo "$response" | tail -n1)
-    local response_body=$(echo "$response" | head -n -1)
-    
-    log_message "DEBUG" "Fallback update response HTTP code: $http_code"
-    log_message "DEBUG" "Fallback update response body: $response_body"
-    
-    if [[ $http_code -eq 200 ]]; then
-        local status=$(echo "$response_body" | jq -r '.status // empty')
-        if [[ "$status" == "success" ]]; then
-            log_message "SUCCESS" "Asset custom fields updated successfully (fallback method)"
-            return 0
-        else
-            local error_message=$(echo "$response_body" | jq -r '.messages // .message // "Unknown error"')
-            log_message "ERROR" "API returned error status: $status"
-            log_message "ERROR" "Error message: $error_message"
-            return 1
-        fi
-    elif [[ $http_code -eq 201 ]]; then
-        log_message "SUCCESS" "Asset custom fields updated successfully (fallback method)"
-        return 0
-    else
-        log_message "ERROR" "Fallback method also failed - HTTP Code: $http_code"
-        log_message "ERROR" "Response: $response_body"
-        return 1
-    fi
-}
-
-# Function to create asset
-create_asset() {
-    local model_id="$1"
-    local company_id="$2"
-    local location_id="$3"
-    local department_id="$4"
-    local supplier_id="$5"
-    
-    log_message "INFO" "Creating asset: $ASSET_NAME"
-    log_message "DEBUG" "Model ID: $model_id"
-    log_message "DEBUG" "Company ID: $company_id"
-    log_message "DEBUG" "Location ID: $location_id"
-    log_message "DEBUG" "Department ID: $department_id"
-    log_message "DEBUG" "Supplier ID: $supplier_id"
-    
-    # Validate model_id
-    if [[ -z "$model_id" || "$model_id" == "null" ]]; then
-        log_message "ERROR" "Invalid model ID: $model_id"
-        return 1
-    fi
-    
-    # Validate that model_id is a number
-    if ! [[ "$model_id" =~ ^[0-9]+$ ]]; then
-        log_message "ERROR" "Model ID is not a valid number: '$model_id'"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Using model ID: $model_id"
-    
-    # Handle empty values for JSON
-    local company_json="null"
-    [[ -n "$company_id" && "$company_id" != "null" ]] && company_json="$company_id"
-    
-    local location_json="null"
-    [[ -n "$location_id" && "$location_id" != "null" ]] && location_json="$location_id"
-    
-    local department_json="null"
-    [[ -n "$department_id" && "$department_id" != "null" ]] && department_json="$department_id"
-    
-    local supplier_json="null"
-    [[ -n "$supplier_id" && "$supplier_id" != "null" ]] && supplier_json="$supplier_id"
-    
-    # Escape custom field values for JSON
-    local escaped_disks=$(escape_json_string "$DISKS")
-    local escaped_hostname=$(escape_json_string "$HOSTNAME")
-    local escaped_ip=$(escape_json_string "$IP_ADDRESS")
-    local escaped_os=$(escape_json_string "$OS")
-    local escaped_software=$(escape_json_string "$SOFTWARE")
-    local escaped_asset_name=$(escape_json_string "$ASSET_NAME")
-    local escaped_asset_tag=$(escape_json_string "$ASSET_TAG")
-    local escaped_purchase_date=$(escape_json_string "$PURCHASE_DATE")
-    local escaped_order_number=$(escape_json_string "$ORDER_NUMBER")
-    local escaped_invoice_number=$(escape_json_string "$INVOICE_NUMBER")
-    
-    # Build JSON for asset
-    local asset_data=$(cat << EOF
-{
-    "name": "$escaped_asset_name",
-    "model_id": $model_id,
-    "status_id": 1,
-    "asset_tag": "$escaped_asset_tag",
-    "company_id": $company_json,
-    "location_id": $location_json,
-    "department_id": $department_json,
-    "supplier_id": $supplier_json,
-    "purchase_date": "$escaped_purchase_date",
-    "warranty_months": $WARRANTY_MONTHS,
-    "order_number": "$escaped_order_number",
-    "invoice_number": "$escaped_invoice_number",
-    "next_audit_date": "$AUDIT_DATE",
-    "expected_checkin": "$EXPECTED_CHECKIN_DATE",
-    "$DISKS_COLUMN": "$escaped_disks",
-    "$MEMORY_COLUMN": $MEMORY,
-    "$VCPU_COLUMN": $VCPU,
-    "$HOSTNAME_COLUMN": "$escaped_hostname",
-    "$IP_COLUMN": "$escaped_ip",
-    "$OS_COLUMN": "$escaped_os",
-    "$SOFTWARE_COLUMN": "$escaped_software"
-}
-EOF
-)
-    
-    # Validate JSON before sending
-    if ! echo "$asset_data" | jq . >/dev/null 2>&1; then
-        log_message "ERROR" "Invalid JSON generated:"
-        log_message "ERROR" "$asset_data"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Asset data to create: $asset_data"
-    
-    local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        -X POST \
-        -d "$asset_data" \
-        "$SNIPEIT_SERVER/api/v1/hardware")
-    
-    local http_code=$(echo "$response" | tail -n1)
-    local response_body=$(echo "$response" | head -n -1)
-    
-    # According to Snipe-IT API docs, they return 200 even on errors
-    if [[ $http_code -eq 200 ]]; then
-        # Check if the response indicates success or error
-        local status=$(echo "$response_body" | jq -r '.status // empty')
-        if [[ "$status" == "success" ]]; then
-            local asset_id=$(echo "$response_body" | jq -r '.payload.id // empty')
-            log_message "SUCCESS" "Asset created successfully - ID: $asset_id"
-            return 0
-        else
-            log_message "ERROR" "API returned error status: $status"
-            log_message "ERROR" "Response: $response_body"
-            return 1
-        fi
-    elif [[ $http_code -eq 201 ]]; then
-        local asset_id=$(echo "$response_body" | jq -r '.id // empty')
-        log_message "SUCCESS" "Asset created successfully - ID: $asset_id"
-        return 0
-    else
-        log_message "ERROR" "Error creating asset - HTTP Code: $http_code"
-        log_message "ERROR" "Response: $response_body"
-        return 1
-    fi
 }
 
 # Function to detect system information
@@ -1177,22 +139,22 @@ detect_system_info() {
         fi
     fi
     
-    # Detect installed software
+    # Detect installed software (improved formatting)
     if [[ -z "$SOFTWARE" ]]; then
         local software_list=""
         
         # Detect package manager and list installed packages
         if command -v dpkg >/dev/null 2>&1; then
-            # Debian/Ubuntu systems
-            software_list=$(dpkg -l | grep '^ii' | awk '{print $2 " " $3}' | head -20 | tr '\n' ', ' | sed 's/, $//')
+            # Debian/Ubuntu systems - format as clean list
+            software_list=$(dpkg -l | grep '^ii' | awk '{print $2 " " $3}' | head -20 | sed 's/^/- /' | tr '\n' '\n' | sed 's/\n$//')
             log_message "INFO" "Detected software (Debian/Ubuntu): $software_list"
         elif command -v rpm >/dev/null 2>&1; then
-            # Red Hat/CentOS systems
-            software_list=$(rpm -qa --queryformat '%{NAME}-%{VERSION}\n' | head -20 | tr '\n' ', ' | sed 's/, $//')
+            # Red Hat/CentOS systems - format as clean list
+            software_list=$(rpm -qa --queryformat '%{NAME}-%{VERSION}\n' | head -20 | sed 's/^/- /' | tr '\n' '\n' | sed 's/\n$//')
             log_message "INFO" "Detected software (Red Hat/CentOS): $software_list"
         elif command -v pacman >/dev/null 2>&1; then
-            # Arch Linux systems
-            software_list=$(pacman -Q | head -20 | tr '\n' ', ' | sed 's/, $//')
+            # Arch Linux systems - format as clean list
+            software_list=$(pacman -Q | head -20 | sed 's/^/- /' | tr '\n' '\n' | sed 's/\n$//')
             log_message "INFO" "Detected software (Arch): $software_list"
         else
             software_list="Unknown package manager"
@@ -1205,207 +167,415 @@ detect_system_info() {
     fi
 }
 
-# Function to check and associate custom fields with model
-check_and_associate_custom_fields() {
-    local model_id="$1"
+# Function to get custom field column names
+get_custom_field_columns() {
+    log_message "INFO" "Getting custom field column names..."
     
-    log_message "INFO" "Checking if custom fields are associated with model ID: $model_id"
-    
-    # Get model details to see current fieldset
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/models/$model_id")
+        "$SNIPEIT_SERVER/api/v1/fields")
     
     if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting model details"
-        if [[ "$FORCE_CUSTOM_FIELDS" == "true" ]]; then
-            log_message "INFO" "Force custom fields enabled, continuing without association"
-            return 0
+        log_message "WARNING" "Error getting custom fields, using default column names"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Custom fields API response: $response"
+    
+    # Try different response formats
+    local fields_json=""
+    
+    # Try .rows format first
+    fields_json=$(echo "$response" | jq -r '.rows // empty')
+    if [[ -n "$fields_json" && "$fields_json" != "null" ]]; then
+        log_message "DEBUG" "Found custom fields in .rows format"
+    else
+        # Try direct array format
+        fields_json=$(echo "$response" | jq -r '. // empty')
+        if [[ -n "$fields_json" && "$fields_json" != "null" ]]; then
+            log_message "DEBUG" "Found custom fields in direct array format"
         else
+            # Try .data format
+            fields_json=$(echo "$response" | jq -r '.data // empty')
+            if [[ -n "$fields_json" && "$fields_json" != "null" ]]; then
+                log_message "DEBUG" "Found custom fields in .data format"
+            else
+                log_message "WARNING" "No custom fields found in any format, using default column names"
+                return 1
+            fi
+        fi
+    fi
+    
+    # Check if fields_json is an array
+    local is_array=$(echo "$fields_json" | jq -r 'if type == "array" then "true" else "false" end')
+    if [[ "$is_array" != "true" ]]; then
+        log_message "WARNING" "Custom fields response is not an array, using default column names"
+        return 1
+    fi
+    
+    # List all available custom fields for debugging
+    log_message "DEBUG" "Available custom fields:"
+    echo "$fields_json" | jq -r '.[] | "  - \(.name) (db_column: \(.db_column_name // "null"))"' >&2
+    
+    # Extract column names for our fields
+    DISKS_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Disque(s)") | .db_column_name // empty')
+    MEMORY_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Mémoire") | .db_column_name // empty')
+    VCPU_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "vCPU") | .db_column_name // empty')
+    HOSTNAME_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Hostname") | .db_column_name // empty')
+    IP_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Adresse IP") | .db_column_name // empty')
+    OS_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "OS") | .db_column_name // empty')
+    SOFTWARE_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Logiciels") | .db_column_name // empty')
+    
+    # Set defaults if not found
+    [[ -z "$DISKS_COLUMN" ]] && DISKS_COLUMN="_snipeit_disques_10"
+    [[ -z "$MEMORY_COLUMN" ]] && MEMORY_COLUMN="_snipeit_memoire_9"
+    [[ -z "$VCPU_COLUMN" ]] && VCPU_COLUMN="_snipeit_vcpu_8"
+    [[ -z "$HOSTNAME_COLUMN" ]] && HOSTNAME_COLUMN="_snipeit_hostname_7"
+    [[ -z "$IP_COLUMN" ]] && IP_COLUMN="_snipeit_adresse_ip_6"
+    [[ -z "$OS_COLUMN" ]] && OS_COLUMN="_snipeit_os_4"
+    [[ -z "$SOFTWARE_COLUMN" ]] && SOFTWARE_COLUMN="_snipeit_logiciels_5"
+    
+    log_message "DEBUG" "Custom field columns:"
+    log_message "DEBUG" "  Disks: $DISKS_COLUMN"
+    log_message "DEBUG" "  Memory: $MEMORY_COLUMN"
+    log_message "DEBUG" "  vCPU: $VCPU_COLUMN"
+    log_message "DEBUG" "  Hostname: $HOSTNAME_COLUMN"
+    log_message "DEBUG" "  IP: $IP_COLUMN"
+    log_message "DEBUG" "  OS: $OS_COLUMN"
+    log_message "DEBUG" "  Software: $SOFTWARE_COLUMN"
+}
+
+# Function to check if asset already exists
+check_asset_exists() {
+    local asset_tag="$1"
+    local asset_name="$2"
+    
+    log_message "INFO" "Checking if asset exists"
+    
+    local search_term=""
+    if [[ -n "$asset_tag" ]]; then
+        search_term="$asset_tag"
+    else
+        search_term="$asset_name"
+    fi
+    
+    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/hardware?search=$search_term&limit=1")
+    
+    if [[ $? -ne 0 ]]; then
+        log_message "WARNING" "Error checking if asset exists"
+        return 1
+    fi
+    
+    local existing_asset=$(echo "$response" | jq -r '.rows[0] // empty')
+    
+    if [[ -n "$existing_asset" && "$existing_asset" != "null" ]]; then
+        local existing_id=$(echo "$existing_asset" | jq -r '.id')
+        local existing_name=$(echo "$existing_asset" | jq -r '.name')
+        log_message "INFO" "Existing asset found - ID: $existing_id, Name: $existing_name"
+        # Store the ID in a global variable to avoid printf issues
+        ASSET_ID_TO_UPDATE="$existing_id"
+        return 0
+    fi
+    
+    log_message "INFO" "No existing asset found"
+    return 1
+}
+
+# Function to get model ID
+get_model_id() {
+    local model_name="$1"
+    
+    log_message "INFO" "Getting model ID: $model_name"
+    
+    # Try exact search first
+    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/models?search=$model_name&limit=10")
+    
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+    
+    local model_id=$(echo "$response" | jq -r '.rows[0].id // empty')
+    local model_name_found=$(echo "$response" | jq -r '.rows[0].name // empty')
+    
+    if [[ -z "$model_id" || "$model_id" == "null" ]]; then
+        # Try without search parameter to get all models
+        response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            "$SNIPEIT_SERVER/api/v1/models?limit=50")
+        
+        if [[ $? -ne 0 ]]; then
             return 1
         fi
-    fi
-    
-    local current_fieldset=$(echo "$response" | jq -r '.fieldset // empty')
-    log_message "DEBUG" "Current model fieldset: $current_fieldset"
-    
-    # Check if our custom fields are in the fieldset
-    local missing_fields=()
-    
-    # Check each custom field
-    if [[ -n "$DISKS_COLUMN" && "$DISKS_COLUMN" != "_snipeit_disques_10" ]]; then
-        local field_id=$(echo "$fields_json" | jq -r --arg col "$DISKS_COLUMN" '.[] | select(.db_column_name == $col) | .id')
-        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
-            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
-                missing_fields+=("$field_id")
-            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
-                missing_fields+=("$field_id")
-            fi
-        fi
-    fi
-    
-    if [[ -n "$MEMORY_COLUMN" && "$MEMORY_COLUMN" != "_snipeit_memoire_9" ]]; then
-        local field_id=$(echo "$fields_json" | jq -r --arg col "$MEMORY_COLUMN" '.[] | select(.db_column_name == $col) | .id')
-        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
-            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
-                missing_fields+=("$field_id")
-            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
-                missing_fields+=("$field_id")
-            fi
-        fi
-    fi
-    
-    if [[ -n "$VCPU_COLUMN" && "$VCPU_COLUMN" != "_snipeit_vcpu_8" ]]; then
-        local field_id=$(echo "$fields_json" | jq -r --arg col "$VCPU_COLUMN" '.[] | select(.db_column_name == $col) | .id')
-        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
-            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
-                missing_fields+=("$field_id")
-            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
-                missing_fields+=("$field_id")
-            fi
-        fi
-    fi
-    
-    if [[ -n "$HOSTNAME_COLUMN" && "$HOSTNAME_COLUMN" != "_snipeit_hostname_7" ]]; then
-        local field_id=$(echo "$fields_json" | jq -r --arg col "$HOSTNAME_COLUMN" '.[] | select(.db_column_name == $col) | .id')
-        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
-            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
-                missing_fields+=("$field_id")
-            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
-                missing_fields+=("$field_id")
-            fi
-        fi
-    fi
-    
-    if [[ -n "$IP_COLUMN" && "$IP_COLUMN" != "_snipeit_adresse_ip_6" ]]; then
-        local field_id=$(echo "$fields_json" | jq -r --arg col "$IP_COLUMN" '.[] | select(.db_column_name == $col) | .id')
-        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
-            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
-                missing_fields+=("$field_id")
-            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
-                missing_fields+=("$field_id")
-            fi
-        fi
-    fi
-    
-    if [[ -n "$OS_COLUMN" && "$OS_COLUMN" != "_snipeit_os_4" ]]; then
-        local field_id=$(echo "$fields_json" | jq -r --arg col "$OS_COLUMN" '.[] | select(.db_column_name == $col) | .id')
-        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
-            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
-                missing_fields+=("$field_id")
-            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
-                missing_fields+=("$field_id")
-            fi
-        fi
-    fi
-    
-    if [[ -n "$SOFTWARE_COLUMN" && "$SOFTWARE_COLUMN" != "_snipeit_logiciels_5" ]]; then
-        local field_id=$(echo "$fields_json" | jq -r --arg col "$SOFTWARE_COLUMN" '.[] | select(.db_column_name == $col) | .id')
-        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
-            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
-                missing_fields+=("$field_id")
-            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
-                missing_fields+=("$field_id")
-            fi
-        fi
-    fi
-    
-    if [[ ${#missing_fields[@]} -gt 0 ]]; then
-        log_message "INFO" "Found ${#missing_fields[@]} custom fields not associated with model"
-        log_message "DEBUG" "Missing field IDs: ${missing_fields[*]}"
         
-        if [[ "$FORCE_CUSTOM_FIELDS" == "true" ]]; then
-            log_message "INFO" "Force custom fields enabled, skipping association"
-            return 0
-        fi
-        
-        # Associate each missing field with the model
-        for field_id in "${missing_fields[@]}"; do
-            log_message "INFO" "Associating field ID $field_id with model $model_id"
-            
-            local associate_response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
-                -H "Accept: application/json" \
-                -H "Content-Type: application/json" \
-                -X POST \
-                -d "{\"model_id\": $model_id}" \
-                "$SNIPEIT_SERVER/api/v1/fields/$field_id/associate")
-            
-            local http_code=$(echo "$associate_response" | tail -n1)
-            local response_body=$(echo "$associate_response" | head -n -1)
-            
-            if [[ $http_code -eq 200 ]]; then
-                log_message "SUCCESS" "Field $field_id associated with model $model_id"
-            else
-                log_message "WARNING" "Failed to associate field $field_id with model $model_id (HTTP $http_code)"
-                log_message "DEBUG" "Response: $response_body"
-            fi
-        done
-    else
-        log_message "INFO" "All custom fields are already associated with the model"
+        # Use jq to find exact match
+        model_id=$(echo "$response" | jq -r --arg name "$model_name" '.rows[] | select(.name == $name) | .id' 2>/dev/null | head -1)
+        model_name_found="$model_name"
     fi
-}
-
-# Function to test API connection
-test_api_connection() {
-    log_message "INFO" "Testing API connection..."
     
-    local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/hardware?limit=1")
-    
-    local http_code=$(echo "$response" | tail -n1)
-    local response_body=$(echo "$response" | head -n -1)
-    
-    if [[ $http_code -eq 200 ]]; then
-        log_message "SUCCESS" "API connection successful"
-        return 0
-    else
-        log_message "ERROR" "API connection failed - HTTP Code: $http_code"
-        log_message "ERROR" "Response: $response_body"
+    if [[ -z "$model_id" || "$model_id" == "null" ]]; then
         return 1
     fi
+    
+    # Return only the clean model ID
+    printf "%s" "$model_id"
 }
 
-# Function to verify asset exists and is accessible
-verify_asset_access() {
+# Function to update asset custom fields
+update_asset_custom_fields() {
     local asset_id="$1"
     
-    log_message "DEBUG" "Verifying access to asset ID: $asset_id"
+    log_message "INFO" "Updating custom fields for asset ID: $asset_id"
+    
+    # Escape custom field values for JSON
+    local escaped_disks=$(escape_json_string "$DISKS")
+    local escaped_hostname=$(escape_json_string "$HOSTNAME")
+    local escaped_ip=$(escape_json_string "$IP_ADDRESS")
+    local escaped_os=$(escape_json_string "$OS")
+    local escaped_software=$(escape_json_string "$SOFTWARE")
+    
+    # Build JSON for custom fields update (at root level as per Snipe-IT API docs)
+    local update_data=$(cat << EOF
+{
+    "$DISKS_COLUMN": "$escaped_disks",
+    "$MEMORY_COLUMN": $MEMORY,
+    "$VCPU_COLUMN": $VCPU,
+    "$HOSTNAME_COLUMN": "$escaped_hostname",
+    "$IP_COLUMN": "$escaped_ip",
+    "$OS_COLUMN": "$escaped_os",
+    "$SOFTWARE_COLUMN": "$escaped_software"
+}
+EOF
+)
+    
+    # Validate JSON before sending
+    if ! echo "$update_data" | jq . >/dev/null 2>&1; then
+        log_message "ERROR" "Invalid JSON generated for asset update:"
+        log_message "ERROR" "$update_data"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Asset update data: $update_data"
+    
+    local response=$(curl -s -w "\n%{http_code}" \
+        -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        -X PUT \
+        -d "$update_data" \
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id" 2>&1)
+    
+    local curl_exit_code=$?
+    
+    if [[ $curl_exit_code -ne 0 ]]; then
+        log_message "ERROR" "Curl command failed with exit code: $curl_exit_code"
+        log_message "ERROR" "Curl error output: $response"
+        return 1
+    fi
+    
+    local http_code=$(echo "$response" | tail -n1)
+    local response_body=$(echo "$response" | head -n -1)
+    
+    log_message "DEBUG" "Update response HTTP code: $http_code"
+    log_message "DEBUG" "Update response body: $response_body"
+    
+    if [[ $http_code -eq 200 ]]; then
+        local status=$(echo "$response_body" | jq -r '.status // empty')
+        if [[ "$status" == "success" ]]; then
+            log_message "SUCCESS" "Asset custom fields updated successfully"
+            return 0
+        else
+            local error_message=$(echo "$response_body" | jq -r '.messages // .message // "Unknown error"')
+            log_message "ERROR" "API returned error status: $status"
+            log_message "ERROR" "Error message: $error_message"
+            return 1
+        fi
+    elif [[ $http_code -eq 201 ]]; then
+        log_message "SUCCESS" "Asset custom fields updated successfully"
+        return 0
+    else
+        log_message "ERROR" "Error updating asset custom fields - HTTP Code: $http_code"
+        log_message "ERROR" "Response: $response_body"
+        return 1
+    fi
+}
+
+# Function to create asset
+create_asset() {
+    local model_id="$1"
+    
+    log_message "INFO" "Creating asset: $ASSET_NAME"
+    
+    # Validate model_id
+    if [[ -z "$model_id" || "$model_id" == "null" ]]; then
+        log_message "ERROR" "Invalid model ID: $model_id"
+        return 1
+    fi
+    
+    # Validate that model_id is a number
+    if ! [[ "$model_id" =~ ^[0-9]+$ ]]; then
+        log_message "ERROR" "Model ID is not a valid number: '$model_id'"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Using model ID: $model_id"
+    
+    # Escape custom field values for JSON
+    local escaped_disks=$(escape_json_string "$DISKS")
+    local escaped_hostname=$(escape_json_string "$HOSTNAME")
+    local escaped_ip=$(escape_json_string "$IP_ADDRESS")
+    local escaped_os=$(escape_json_string "$OS")
+    local escaped_software=$(escape_json_string "$SOFTWARE")
+    local escaped_asset_name=$(escape_json_string "$ASSET_NAME")
+    local escaped_asset_tag=$(escape_json_string "$ASSET_TAG")
+    
+    # Build JSON for asset
+    local asset_data=$(cat << EOF
+{
+    "name": "$escaped_asset_name",
+    "model_id": $model_id,
+    "status_id": 1,
+    "asset_tag": "$escaped_asset_tag",
+    "$DISKS_COLUMN": "$escaped_disks",
+    "$MEMORY_COLUMN": $MEMORY,
+    "$VCPU_COLUMN": $VCPU,
+    "$HOSTNAME_COLUMN": "$escaped_hostname",
+    "$IP_COLUMN": "$escaped_ip",
+    "$OS_COLUMN": "$escaped_os",
+    "$SOFTWARE_COLUMN": "$escaped_software"
+}
+EOF
+)
+    
+    # Validate JSON before sending
+    if ! echo "$asset_data" | jq . >/dev/null 2>&1; then
+        log_message "ERROR" "Invalid JSON generated:"
+        log_message "ERROR" "$asset_data"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Asset data to create: $asset_data"
     
     local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
+        -X POST \
+        -d "$asset_data" \
+        "$SNIPEIT_SERVER/api/v1/hardware")
     
     local http_code=$(echo "$response" | tail -n1)
     local response_body=$(echo "$response" | head -n -1)
     
     if [[ $http_code -eq 200 ]]; then
-        local asset_name=$(echo "$response_body" | jq -r '.name // empty')
-        log_message "DEBUG" "Asset verified: $asset_name (ID: $asset_id)"
+        local status=$(echo "$response_body" | jq -r '.status // empty')
+        if [[ "$status" == "success" ]]; then
+            local asset_id=$(echo "$response_body" | jq -r '.payload.id // empty')
+            log_message "SUCCESS" "Asset created successfully - ID: $asset_id"
+            return 0
+        else
+            log_message "ERROR" "API returned error status: $status"
+            log_message "ERROR" "Response: $response_body"
+            return 1
+        fi
+    elif [[ $http_code -eq 201 ]]; then
+        local asset_id=$(echo "$response_body" | jq -r '.id // empty')
+        log_message "SUCCESS" "Asset created successfully - ID: $asset_id"
         return 0
     else
-        log_message "ERROR" "Cannot access asset ID $asset_id - HTTP Code: $http_code"
+        log_message "ERROR" "Error creating asset - HTTP Code: $http_code"
         log_message "ERROR" "Response: $response_body"
         return 1
     fi
+}
+
+# Function to display help messages
+show_help() {
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+Script to create assets in SnipeIT with custom fields management
+
+OPTIONS:
+    -s, --server URL        SnipeIT server URL (required)
+    -t, --token TOKEN       SnipeIT API token (required)
+    -m, --model MODEL       Asset model name (required)
+    -n, --name NAME         Asset name (optional, defaults to hostname)
+    -a, --asset-tag TAG     Asset tag (optional)
+    --hostname HOSTNAME     Hostname (text)
+    --ip-address IP         IP address (text)
+    --os OS                 Operating system (text)
+    --memory MEMORY         Memory in GB (numeric)
+    --vcpu VCPU             vCPU (numeric)
+    --disks DISKS           Disk(s) (textarea)
+    --software SOFTWARE     Software (textarea)
+    --no-auto-detect        Disable automatic system information detection
+    -v, --verbose           Verbose mode
+    -h, --help             Show this help
+
+AUTO-DETECTION:
+    The script automatically detects system information if not provided:
+    - CPU cores (vCPU)
+    - Memory (RAM) in GB
+    - Disk information
+    - Operating system
+    - IP address
+    - Hostname
+    - Installed software (formatted as clean list)
+
+EXAMPLES:
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --hostname "server01.company.com" --ip-address "192.168.1.100"
+
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-auto-detect
+
+EOF
 }
 
 # Main function
 main() {
     log_message "INFO" "Starting SnipeIT asset creation script"
     
-    # Detect operating system
-    detect_os
-    
     # Validate parameters
-    validate_required_params
-    validate_server_url
+    if [[ -z "$SNIPEIT_SERVER" || -z "$API_TOKEN" || -z "$MODEL_NAME" ]]; then
+        log_message "ERROR" "Missing required parameters: server, token, or model"
+        echo
+        show_help
+        exit 1
+    fi
     
-    # Set default asset name if not provided
-    set_default_asset_name
+    # Validate server URL
+    if [[ ! "$SNIPEIT_SERVER" =~ ^https?:// ]]; then
+        log_message "ERROR" "Server URL must start with http:// or https://"
+        exit 1
+    fi
+    
+    # Remove trailing slash if exists
+    SNIPEIT_SERVER=${SNIPEIT_SERVER%/}
+    
+    # Set default asset name based on hostname
+    if [[ -z "$ASSET_NAME" ]]; then
+        if [[ -n "$HOSTNAME" ]]; then
+            ASSET_NAME="$HOSTNAME"
+            log_message "INFO" "Using hostname as asset name: $ASSET_NAME"
+        else
+            # Try to get hostname from system
+            local system_hostname=$(hostname 2>/dev/null || echo "")
+            if [[ -n "$system_hostname" ]]; then
+                ASSET_NAME="$system_hostname"
+                log_message "INFO" "Using system hostname as asset name: $ASSET_NAME"
+            else
+                log_message "ERROR" "No asset name provided and unable to determine hostname"
+                log_message "INFO" "Please provide an asset name with --name option or hostname with --hostname option"
+                exit 1
+            fi
+        fi
+    fi
     
     # Detect system information (unless disabled)
     if [[ "$NO_AUTO_DETECT" != "true" ]]; then
@@ -1414,58 +584,20 @@ main() {
         log_message "INFO" "Auto-detection disabled, using provided values only"
     fi
     
-    # Calculate dates
-    calculate_dates
-    
     # Get custom field column names
-    if [[ "$NO_CUSTOM_FIELDS" != "true" ]]; then
-        get_custom_field_columns
-        if [[ $? -ne 0 ]]; then
-            log_message "INFO" "Trying alternative method to get custom field columns..."
-            get_custom_field_columns_from_models
-            if [[ $? -ne 0 ]]; then
-                log_message "INFO" "Trying to analyze existing assets for custom fields..."
-                get_custom_fields_from_existing_asset
-            fi
-        fi
-    else
-        log_message "INFO" "Skipping custom field column name retrieval (using defaults)"
-    fi
+    get_custom_field_columns
     
     # Check if asset exists
     if check_asset_exists "$ASSET_TAG" "$ASSET_NAME"; then
         log_message "INFO" "Asset already exists. Updating custom fields..."
         
-        # Test API connection first
-        if ! test_api_connection; then
-            log_message "ERROR" "Cannot connect to Snipe-IT API"
-            exit 1
-        fi
-        
-        # Verify asset access
-        if ! verify_asset_access "$ASSET_ID_TO_UPDATE"; then
-            log_message "ERROR" "Cannot access the existing asset"
-            exit 1
-        fi
-        
-        # Detect system information (unless disabled) for update
-        if [[ "$NO_AUTO_DETECT" != "true" ]]; then
-            detect_system_info
-        fi
-        
-        # Update custom fields with fallback
+        # Update custom fields
         if update_asset_custom_fields "$ASSET_ID_TO_UPDATE"; then
             log_message "SUCCESS" "Asset custom fields updated successfully"
             exit 0
         else
-            log_message "WARNING" "Primary update method failed, trying fallback method..."
-            if update_asset_custom_fields_fallback "$ASSET_ID_TO_UPDATE"; then
-                log_message "SUCCESS" "Asset custom fields updated successfully (fallback method)"
-                exit 0
-            else
-                log_message "ERROR" "Both update methods failed"
-                exit 1
-            fi
+            log_message "ERROR" "Failed to update asset custom fields"
+            exit 1
         fi
     fi
     
@@ -1479,19 +611,8 @@ main() {
     
     log_message "INFO" "Using model ID: $model_id"
     
-    # Check and associate custom fields with model if needed
-    if [[ "$NO_CUSTOM_FIELDS" != "true" ]]; then
-        check_and_associate_custom_fields "$model_id"
-    fi
-    
-    # Get other IDs
-    local company_id=$(get_company_id)
-    local location_id=$(get_location_id)
-    local department_id=$(get_department_id)
-    local supplier_id=$(get_supplier_id)
-    
-    # Create asset with explicit model_id
-    if create_asset "$model_id" "$company_id" "$location_id" "$department_id" "$supplier_id"; then
+    # Create asset
+    if create_asset "$model_id"; then
         log_message "SUCCESS" "Asset created successfully in SnipeIT"
         exit 0
     else
@@ -1506,14 +627,6 @@ API_TOKEN=""
 MODEL_NAME=""
 ASSET_NAME=""
 ASSET_TAG=""
-COMPANY_NAME=""
-LOCATION_NAME=""
-DEPARTMENT_NAME=""
-SUPPLIER_NAME=""
-PURCHASE_DATE=""
-WARRANTY_MONTHS=""
-ORDER_NUMBER=""
-INVOICE_NUMBER=""
 DISKS=""
 MEMORY=""
 VCPU=""
@@ -1522,11 +635,8 @@ IP_ADDRESS=""
 OS=""
 SOFTWARE=""
 VERBOSE="false"
-AUTO_INSTALL="false"
+AUTO_DETECT="false"
 NO_AUTO_DETECT="false"
-FORCE_UPDATE="false"
-NO_CUSTOM_FIELDS="false"
-FORCE_CUSTOM_FIELDS="false"
 ASSET_ID_TO_UPDATE=""
 
 # Custom field column names (will be populated by get_custom_field_columns)
@@ -1561,50 +671,6 @@ while [[ $# -gt 0 ]]; do
             ASSET_TAG="$2"
             shift 2
             ;;
-        -c|--company)
-            COMPANY_NAME="$2"
-            shift 2
-            ;;
-        -l|--location)
-            LOCATION_NAME="$2"
-            shift 2
-            ;;
-        -d|--department)
-            DEPARTMENT_NAME="$2"
-            shift 2
-            ;;
-        -u|--supplier)
-            SUPPLIER_NAME="$2"
-            shift 2
-            ;;
-        -p|--purchase-date)
-            PURCHASE_DATE="$2"
-            shift 2
-            ;;
-        -w|--warranty-months)
-            WARRANTY_MONTHS="$2"
-            shift 2
-            ;;
-        -o|--order-number)
-            ORDER_NUMBER="$2"
-            shift 2
-            ;;
-        -i|--invoice-number)
-            INVOICE_NUMBER="$2"
-            shift 2
-            ;;
-        --disks)
-            DISKS="$2"
-            shift 2
-            ;;
-        --memory)
-            MEMORY="$2"
-            shift 2
-            ;;
-        --vcpu)
-            VCPU="$2"
-            shift 2
-            ;;
         --hostname)
             HOSTNAME="$2"
             shift 2
@@ -1617,28 +683,24 @@ while [[ $# -gt 0 ]]; do
             OS="$2"
             shift 2
             ;;
+        --memory)
+            MEMORY="$2"
+            shift 2
+            ;;
+        --vcpu)
+            VCPU="$2"
+            shift 2
+            ;;
+        --disks)
+            DISKS="$2"
+            shift 2
+            ;;
         --software)
             SOFTWARE="$2"
             shift 2
             ;;
-        --auto-install)
-            AUTO_INSTALL="true"
-            shift
-            ;;
         --no-auto-detect)
             NO_AUTO_DETECT="true"
-            shift
-            ;;
-        --no-custom-fields)
-            NO_CUSTOM_FIELDS="true"
-            shift
-            ;;
-        --force-custom-fields)
-            FORCE_CUSTOM_FIELDS="true"
-            shift
-            ;;
-        --force-update)
-            FORCE_UPDATE="true"
             shift
             ;;
         -v|--verbose)
@@ -1656,72 +718,6 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-
-# Dependency checking and installation
-if [[ "$AUTO_INSTALL" == "true" ]]; then
-    install_dependencies
-    if [[ $? -ne 0 ]]; then
-        log_message "ERROR" "Failed to install dependencies automatically"
-        log_message "INFO" "Please install manually:"
-        log_message "INFO" "  - On Debian/Ubuntu: sudo apt-get install curl jq"
-        log_message "INFO" "  - On CentOS/RHEL: sudo yum install curl jq"
-        log_message "INFO" "  - On Fedora: sudo dnf install curl jq"
-        exit 1
-    fi
-else
-    # Simple dependency checking
-    missing_deps=()
-    if ! command -v curl >/dev/null 2>&1; then
-        missing_deps+=("curl")
-    fi
-    if ! command -v jq >/dev/null 2>&1; then
-        missing_deps+=("jq")
-    fi
-    
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        log_message "ERROR" "Missing dependencies: ${missing_deps[*]}"
-        log_message "INFO" "Use the --auto-install option to install automatically"
-        log_message "INFO" "Or install manually:"
-        log_message "INFO" "  - On Debian/Ubuntu: sudo apt-get install curl jq"
-        log_message "INFO" "  - On CentOS/RHEL: sudo yum install curl jq"
-        log_message "INFO" "  - On Fedora: sudo dnf install curl jq"
-        exit 1
-    fi
-fi
-
-# Default values for optional fields
-[[ -z "$ASSET_TAG" ]] && ASSET_TAG=""
-[[ -z "$COMPANY_NAME" ]] && COMPANY_NAME=""
-[[ -z "$LOCATION_NAME" ]] && LOCATION_NAME=""
-[[ -z "$DEPARTMENT_NAME" ]] && DEPARTMENT_NAME=""
-[[ -z "$SUPPLIER_NAME" ]] && SUPPLIER_NAME=""
-[[ -z "$PURCHASE_DATE" ]] && PURCHASE_DATE=""
-[[ -z "$WARRANTY_MONTHS" ]] && WARRANTY_MONTHS="0"
-[[ -z "$ORDER_NUMBER" ]] && ORDER_NUMBER=""
-[[ -z "$INVOICE_NUMBER" ]] && INVOICE_NUMBER=""
-[[ -z "$DISKS" ]] && DISKS=""
-[[ -z "$MEMORY" ]] && MEMORY="0"
-[[ -z "$VCPU" ]] && VCPU="0"
-[[ -z "$HOSTNAME" ]] && HOSTNAME=""
-[[ -z "$IP_ADDRESS" ]] && IP_ADDRESS=""
-[[ -z "$OS" ]] && OS=""
-[[ -z "$SOFTWARE" ]] && SOFTWARE=""
-
-# Validate numeric fields
-if [[ -n "$MEMORY" && ! "$MEMORY" =~ ^[0-9]+$ ]]; then
-    log_message "ERROR" "Memory must be a numeric value"
-    exit 1
-fi
-
-if [[ -n "$VCPU" && ! "$VCPU" =~ ^[0-9]+$ ]]; then
-    log_message "ERROR" "vCPU must be a numeric value"
-    exit 1
-fi
-
-if [[ -n "$WARRANTY_MONTHS" && ! "$WARRANTY_MONTHS" =~ ^[0-9]+$ ]]; then
-    log_message "ERROR" "Warranty months must be a numeric value"
-    exit 1
-fi
 
 # Execute main script
 main "$@"
