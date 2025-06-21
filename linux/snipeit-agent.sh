@@ -386,7 +386,12 @@ update_asset_custom_fields() {
          .[\$hostname_col] = \$hostname | 
          .[\$ip_col] = \$ip | 
          .[\$os_col] = \$os | 
-         .[\$software_col] = \$software")
+         .[\$software_col] = \$software |
+         del(.image) |
+         del(.last_checkout) |
+         del(.next_audit_date) |
+         del(.assigned_to) |
+         del(.assigned_type)")
     
     if [[ $? -ne 0 ]]; then
         log_message "ERROR" "Failed to update asset data with jq"
