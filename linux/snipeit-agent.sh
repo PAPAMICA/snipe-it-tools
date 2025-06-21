@@ -738,23 +738,186 @@ get_custom_fields_from_existing_asset() {
     fi
 }
 
+# Function to escape JSON strings
+escape_json_string() {
+    local string="$1"
+    # Escape backslashes, quotes, and newlines
+    echo "$string" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\n/\\n/g' | sed 's/\r/\\r/g' | sed 's/\t/\\t/g'
+}
+
 # Function to update asset custom fields
 update_asset_custom_fields() {
     local asset_id="$1"
     
     log_message "INFO" "Updating custom fields for asset ID: $asset_id"
     
-    # Build JSON for custom fields update
+    # First, get the current asset data to ensure we have all required fields
+    log_message "DEBUG" "Getting current asset data for ID: $asset_id"
+    local current_asset_response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
+    
+    if [[ $? -ne 0 ]]; then
+        log_message "ERROR" "Failed to get current asset data"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Current asset response: $current_asset_response"
+    
+    # Extract current asset data
+    local current_name=$(echo "$current_asset_response" | jq -r '.name // empty')
+    local current_model_id=$(echo "$current_asset_response" | jq -r '.model_id // empty')
+    local current_status_id=$(echo "$current_asset_response" | jq -r '.status_id // empty')
+    local current_asset_tag=$(echo "$current_asset_response" | jq -r '.asset_tag // empty')
+    local current_company_id=$(echo "$current_asset_response" | jq -r '.company_id // empty')
+    local current_location_id=$(echo "$current_asset_response" | jq -r '.location_id // empty')
+    local current_department_id=$(echo "$current_asset_response" | jq -r '.department_id // empty')
+    local current_supplier_id=$(echo "$current_asset_response" | jq -r '.supplier_id // empty')
+    
+    # Handle null values for JSON
+    local company_json="null"
+    [[ -n "$current_company_id" && "$current_company_id" != "null" ]] && company_json="$current_company_id"
+    
+    local location_json="null"
+    [[ -n "$current_location_id" && "$current_location_id" != "null" ]] && location_json="$current_location_id"
+    
+    local department_json="null"
+    [[ -n "$current_department_id" && "$current_department_id" != "null" ]] && department_json="$current_department_id"
+    
+    local supplier_json="null"
+    [[ -n "$current_supplier_id" && "$current_supplier_id" != "null" ]] && supplier_json="$current_supplier_id"
+    
+    # Escape custom field values for JSON
+    local escaped_disks=$(escape_json_string "$DISKS")
+    local escaped_hostname=$(escape_json_string "$HOSTNAME")
+    local escaped_ip=$(escape_json_string "$IP_ADDRESS")
+    local escaped_os=$(escape_json_string "$OS")
+    local escaped_software=$(escape_json_string "$SOFTWARE")
+    local escaped_asset_name=$(escape_json_string "$ASSET_NAME")
+    local escaped_asset_tag=$(escape_json_string "$ASSET_TAG")
+    local escaped_purchase_date=$(escape_json_string "$PURCHASE_DATE")
+    local escaped_order_number=$(escape_json_string "$ORDER_NUMBER")
+    local escaped_invoice_number=$(escape_json_string "$INVOICE_NUMBER")
+    
+    # Build JSON for asset update (include all required fields)
+    local update_data=$(cat << EOF
+{
+    "name": "$current_name",
+    "model_id": $current_model_id,
+    "status_id": $current_status_id,
+    "asset_tag": "$current_asset_tag",
+    "company_id": $company_json,
+    "location_id": $location_json,
+    "department_id": $department_json,
+    "supplier_id": $supplier_json,
+    "custom_fields": {
+        "$DISKS_COLUMN": "$escaped_disks",
+        "$MEMORY_COLUMN": $MEMORY,
+        "$VCPU_COLUMN": $VCPU,
+        "$HOSTNAME_COLUMN": "$escaped_hostname",
+        "$IP_COLUMN": "$escaped_ip",
+        "$OS_COLUMN": "$escaped_os",
+        "$SOFTWARE_COLUMN": "$escaped_software"
+    }
+}
+EOF
+)
+    
+    # Validate JSON before sending
+    if ! echo "$update_data" | jq . >/dev/null 2>&1; then
+        log_message "ERROR" "Invalid JSON generated for asset update:"
+        log_message "ERROR" "$update_data"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Asset update data: $update_data"
+    
+    # Make the update request with better error handling
+    log_message "DEBUG" "Making PUT request to: $SNIPEIT_SERVER/api/v1/hardware/$asset_id"
+    
+    local response=$(curl -s -w "\n%{http_code}" \
+        -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        -X PUT \
+        -d "$update_data" \
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id" 2>&1)
+    
+    local curl_exit_code=$?
+    
+    if [[ $curl_exit_code -ne 0 ]]; then
+        log_message "ERROR" "Curl command failed with exit code: $curl_exit_code"
+        log_message "ERROR" "Curl error output: $response"
+        return 1
+    fi
+    
+    local http_code=$(echo "$response" | tail -n1)
+    local response_body=$(echo "$response" | head -n -1)
+    
+    log_message "DEBUG" "Update response HTTP code: $http_code"
+    log_message "DEBUG" "Update response body: $response_body"
+    
+    # Check HTTP response codes
+    if [[ $http_code -eq 200 ]]; then
+        # Check if the response indicates success or error
+        local status=$(echo "$response_body" | jq -r '.status // empty')
+        if [[ "$status" == "success" ]]; then
+            log_message "SUCCESS" "Asset custom fields updated successfully"
+            return 0
+        else
+            local error_message=$(echo "$response_body" | jq -r '.messages // .message // "Unknown error"')
+            log_message "ERROR" "API returned error status: $status"
+            log_message "ERROR" "Error message: $error_message"
+            log_message "ERROR" "Full response: $response_body"
+            return 1
+        fi
+    elif [[ $http_code -eq 201 ]]; then
+        log_message "SUCCESS" "Asset custom fields updated successfully"
+        return 0
+    elif [[ $http_code -eq 422 ]]; then
+        log_message "ERROR" "Validation error (HTTP 422)"
+        log_message "ERROR" "Response: $response_body"
+        return 1
+    elif [[ $http_code -eq 404 ]]; then
+        log_message "ERROR" "Asset not found (HTTP 404)"
+        log_message "ERROR" "Response: $response_body"
+        return 1
+    elif [[ $http_code -eq 401 ]]; then
+        log_message "ERROR" "Unauthorized (HTTP 401) - Check API token"
+        log_message "ERROR" "Response: $response_body"
+        return 1
+    else
+        log_message "ERROR" "Error updating asset custom fields - HTTP Code: $http_code"
+        log_message "ERROR" "Response: $response_body"
+        return 1
+    fi
+}
+
+# Function to update asset custom fields (fallback method)
+update_asset_custom_fields_fallback() {
+    local asset_id="$1"
+    
+    log_message "INFO" "Trying fallback method: updating only custom fields for asset ID: $asset_id"
+    
+    # Escape custom field values for JSON
+    local escaped_disks=$(escape_json_string "$DISKS")
+    local escaped_hostname=$(escape_json_string "$HOSTNAME")
+    local escaped_ip=$(escape_json_string "$IP_ADDRESS")
+    local escaped_os=$(escape_json_string "$OS")
+    local escaped_software=$(escape_json_string "$SOFTWARE")
+    
+    # Build JSON for custom fields only update
     local custom_fields_data=$(cat << EOF
 {
     "custom_fields": {
-        "$DISKS_COLUMN": "$DISKS",
+        "$DISKS_COLUMN": "$escaped_disks",
         "$MEMORY_COLUMN": $MEMORY,
         "$VCPU_COLUMN": $VCPU,
-        "$HOSTNAME_COLUMN": "$HOSTNAME",
-        "$IP_COLUMN": "$IP_ADDRESS",
-        "$OS_COLUMN": "$OS",
-        "$SOFTWARE_COLUMN": "$SOFTWARE"
+        "$HOSTNAME_COLUMN": "$escaped_hostname",
+        "$IP_COLUMN": "$escaped_ip",
+        "$OS_COLUMN": "$escaped_os",
+        "$SOFTWARE_COLUMN": "$escaped_software"
     }
 }
 EOF
@@ -767,38 +930,46 @@ EOF
         return 1
     fi
     
-    log_message "DEBUG" "Custom fields data to update: $custom_fields_data"
+    log_message "DEBUG" "Custom fields only update data: $custom_fields_data"
     
-    local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
+    local response=$(curl -s -w "\n%{http_code}" \
+        -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
         -X PUT \
         -d "$custom_fields_data" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id" 2>&1)
+    
+    local curl_exit_code=$?
+    
+    if [[ $curl_exit_code -ne 0 ]]; then
+        log_message "ERROR" "Curl command failed with exit code: $curl_exit_code"
+        log_message "ERROR" "Curl error output: $response"
+        return 1
+    fi
     
     local http_code=$(echo "$response" | tail -n1)
     local response_body=$(echo "$response" | head -n -1)
     
-    log_message "DEBUG" "Update response HTTP code: $http_code"
-    log_message "DEBUG" "Update response body: $response_body"
+    log_message "DEBUG" "Fallback update response HTTP code: $http_code"
+    log_message "DEBUG" "Fallback update response body: $response_body"
     
-    # According to Snipe-IT API docs, they return 200 even on errors
     if [[ $http_code -eq 200 ]]; then
-        # Check if the response indicates success or error
         local status=$(echo "$response_body" | jq -r '.status // empty')
         if [[ "$status" == "success" ]]; then
-            log_message "SUCCESS" "Asset custom fields updated successfully"
+            log_message "SUCCESS" "Asset custom fields updated successfully (fallback method)"
             return 0
         else
+            local error_message=$(echo "$response_body" | jq -r '.messages // .message // "Unknown error"')
             log_message "ERROR" "API returned error status: $status"
-            log_message "ERROR" "Response: $response_body"
+            log_message "ERROR" "Error message: $error_message"
             return 1
         fi
     elif [[ $http_code -eq 201 ]]; then
-        log_message "SUCCESS" "Asset custom fields updated successfully"
+        log_message "SUCCESS" "Asset custom fields updated successfully (fallback method)"
         return 0
     else
-        log_message "ERROR" "Error updating asset custom fields - HTTP Code: $http_code"
+        log_message "ERROR" "Fallback method also failed - HTTP Code: $http_code"
         log_message "ERROR" "Response: $response_body"
         return 1
     fi
@@ -846,31 +1017,43 @@ create_asset() {
     local supplier_json="null"
     [[ -n "$supplier_id" && "$supplier_id" != "null" ]] && supplier_json="$supplier_id"
     
+    # Escape custom field values for JSON
+    local escaped_disks=$(escape_json_string "$DISKS")
+    local escaped_hostname=$(escape_json_string "$HOSTNAME")
+    local escaped_ip=$(escape_json_string "$IP_ADDRESS")
+    local escaped_os=$(escape_json_string "$OS")
+    local escaped_software=$(escape_json_string "$SOFTWARE")
+    local escaped_asset_name=$(escape_json_string "$ASSET_NAME")
+    local escaped_asset_tag=$(escape_json_string "$ASSET_TAG")
+    local escaped_purchase_date=$(escape_json_string "$PURCHASE_DATE")
+    local escaped_order_number=$(escape_json_string "$ORDER_NUMBER")
+    local escaped_invoice_number=$(escape_json_string "$INVOICE_NUMBER")
+    
     # Build JSON for asset
     local asset_data=$(cat << EOF
 {
-    "name": "$ASSET_NAME",
+    "name": "$escaped_asset_name",
     "model_id": $model_id,
     "status_id": 1,
-    "asset_tag": "$ASSET_TAG",
+    "asset_tag": "$escaped_asset_tag",
     "company_id": $company_json,
     "location_id": $location_json,
     "department_id": $department_json,
     "supplier_id": $supplier_json,
-    "purchase_date": "$PURCHASE_DATE",
+    "purchase_date": "$escaped_purchase_date",
     "warranty_months": $WARRANTY_MONTHS,
-    "order_number": "$ORDER_NUMBER",
-    "invoice_number": "$INVOICE_NUMBER",
+    "order_number": "$escaped_order_number",
+    "invoice_number": "$escaped_invoice_number",
     "next_audit_date": "$AUDIT_DATE",
     "expected_checkin": "$EXPECTED_CHECKIN_DATE",
     "custom_fields": {
-        "$DISKS_COLUMN": "$DISKS",
+        "$DISKS_COLUMN": "$escaped_disks",
         "$MEMORY_COLUMN": $MEMORY,
         "$VCPU_COLUMN": $VCPU,
-        "$HOSTNAME_COLUMN": "$HOSTNAME",
-        "$IP_COLUMN": "$IP_ADDRESS",
-        "$OS_COLUMN": "$OS",
-        "$SOFTWARE_COLUMN": "$SOFTWARE"
+        "$HOSTNAME_COLUMN": "$escaped_hostname",
+        "$IP_COLUMN": "$escaped_ip",
+        "$OS_COLUMN": "$escaped_os",
+        "$SOFTWARE_COLUMN": "$escaped_software"
     }
 }
 EOF
@@ -1179,6 +1362,53 @@ check_and_associate_custom_fields() {
     fi
 }
 
+# Function to test API connection
+test_api_connection() {
+    log_message "INFO" "Testing API connection..."
+    
+    local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/hardware?limit=1")
+    
+    local http_code=$(echo "$response" | tail -n1)
+    local response_body=$(echo "$response" | head -n -1)
+    
+    if [[ $http_code -eq 200 ]]; then
+        log_message "SUCCESS" "API connection successful"
+        return 0
+    else
+        log_message "ERROR" "API connection failed - HTTP Code: $http_code"
+        log_message "ERROR" "Response: $response_body"
+        return 1
+    fi
+}
+
+# Function to verify asset exists and is accessible
+verify_asset_access() {
+    local asset_id="$1"
+    
+    log_message "DEBUG" "Verifying access to asset ID: $asset_id"
+    
+    local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
+    
+    local http_code=$(echo "$response" | tail -n1)
+    local response_body=$(echo "$response" | head -n -1)
+    
+    if [[ $http_code -eq 200 ]]; then
+        local asset_name=$(echo "$response_body" | jq -r '.name // empty')
+        log_message "DEBUG" "Asset verified: $asset_name (ID: $asset_id)"
+        return 0
+    else
+        log_message "ERROR" "Cannot access asset ID $asset_id - HTTP Code: $http_code"
+        log_message "ERROR" "Response: $response_body"
+        return 1
+    fi
+}
+
 # Main function
 main() {
     log_message "INFO" "Starting SnipeIT asset creation script"
@@ -1223,18 +1453,36 @@ main() {
     if existing_asset_id=$(check_asset_exists "$ASSET_TAG" "$ASSET_NAME"); then
         log_message "INFO" "Asset already exists. Updating custom fields..."
         
+        # Test API connection first
+        if ! test_api_connection; then
+            log_message "ERROR" "Cannot connect to Snipe-IT API"
+            exit 1
+        fi
+        
+        # Verify asset access
+        if ! verify_asset_access "$existing_asset_id"; then
+            log_message "ERROR" "Cannot access the existing asset"
+            exit 1
+        fi
+        
         # Detect system information (unless disabled) for update
         if [[ "$NO_AUTO_DETECT" != "true" ]]; then
             detect_system_info
         fi
         
-        # Update custom fields
+        # Update custom fields with fallback
         if update_asset_custom_fields "$existing_asset_id"; then
             log_message "SUCCESS" "Asset custom fields updated successfully"
             exit 0
         else
-            log_message "ERROR" "Failed to update asset custom fields"
-            exit 1
+            log_message "WARNING" "Primary update method failed, trying fallback method..."
+            if update_asset_custom_fields_fallback "$existing_asset_id"; then
+                log_message "SUCCESS" "Asset custom fields updated successfully (fallback method)"
+                exit 0
+            else
+                log_message "ERROR" "Both update methods failed"
+                exit 1
+            fi
         fi
     fi
     
