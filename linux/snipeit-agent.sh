@@ -314,21 +314,28 @@ get_model_id() {
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/models?search=$MODEL_NAME&limit=1")
+        "$SNIPEIT_SERVER/api/v1/models?search=$MODEL_NAME&limit=10")
     
     if [[ $? -ne 0 ]]; then
         log_message "ERROR" "Error getting model"
         return 1
     fi
     
+    if [[ "$VERBOSE" == "true" ]]; then
+        log_message "DEBUG" "Model search response: $response"
+    fi
+    
     local model_id=$(echo "$response" | jq -r '.rows[0].id // empty')
+    local model_name=$(echo "$response" | jq -r '.rows[0].name // empty')
     
     if [[ -z "$model_id" || "$model_id" == "null" ]]; then
         log_message "ERROR" "Model '$MODEL_NAME' not found"
+        log_message "INFO" "Available models:"
+        echo "$response" | jq -r '.rows[] | "  - \(.name) (ID: \(.id))"' 2>/dev/null || log_message "INFO" "Unable to list available models"
         return 1
     fi
     
-    log_message "SUCCESS" "Model found with ID: $model_id"
+    log_message "SUCCESS" "Model found: $model_name (ID: $model_id)"
     echo "$model_id"
 }
 
@@ -513,13 +520,13 @@ create_asset() {
     "next_audit_date": "$AUDIT_DATE",
     "expected_checkin": "$EXPECTED_CHECKIN_DATE",
     "custom_fields": {
-        "disks": "$DISKS",
-        "memory": $MEMORY,
-        "vcpu": $VCPU,
-        "hostname": "$HOSTNAME",
-        "ip_address": "$IP_ADDRESS",
-        "os": "$OS",
-        "software": "$SOFTWARE"
+        "Disque(s)": "$DISKS",
+        "Mémoire": $MEMORY,
+        "vCPU": $VCPU,
+        "Hostname": "$HOSTNAME",
+        "Adresse IP": "$IP_ADDRESS",
+        "OS": "$OS",
+        "Logiciels": "$SOFTWARE"
     }
 }
 EOF
