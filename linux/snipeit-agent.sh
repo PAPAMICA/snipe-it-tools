@@ -378,6 +378,9 @@ get_model_id() {
         return 1
     fi
     
+    # Clean the model_id to ensure it's just a number
+    model_id=$(echo "$model_id" | tr -d '[:space:]')
+    
     log_message "SUCCESS" "Model found: $model_name (ID: $model_id)"
     echo "$model_id"
 }
@@ -556,6 +559,9 @@ create_asset() {
         return 1
     fi
     
+    # Clean model_id to ensure it's just a number
+    model_id=$(echo "$model_id" | tr -d '[:space:]')
+    
     # Handle empty values for JSON
     local company_json="null"
     [[ -n "$company_id" && "$company_id" != "null" ]] && company_json="$company_id"
@@ -599,6 +605,13 @@ create_asset() {
 EOF
 )
     
+    # Validate JSON before sending
+    if ! echo "$asset_data" | jq . >/dev/null 2>&1; then
+        log_message "ERROR" "Invalid JSON generated:"
+        log_message "ERROR" "$asset_data"
+        return 1
+    fi
+    
     log_message "DEBUG" "Asset data to create: $asset_data"
     
     local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
@@ -611,7 +624,20 @@ EOF
     local http_code=$(echo "$response" | tail -n1)
     local response_body=$(echo "$response" | head -n -1)
     
-    if [[ $http_code -eq 200 || $http_code -eq 201 ]]; then
+    # According to Snipe-IT API docs, they return 200 even on errors
+    if [[ $http_code -eq 200 ]]; then
+        # Check if the response indicates success or error
+        local status=$(echo "$response_body" | jq -r '.status // empty')
+        if [[ "$status" == "success" ]]; then
+            local asset_id=$(echo "$response_body" | jq -r '.payload.id // empty')
+            log_message "SUCCESS" "Asset created successfully - ID: $asset_id"
+            return 0
+        else
+            log_message "ERROR" "API returned error status: $status"
+            log_message "ERROR" "Response: $response_body"
+            return 1
+        fi
+    elif [[ $http_code -eq 201 ]]; then
         local asset_id=$(echo "$response_body" | jq -r '.id // empty')
         log_message "SUCCESS" "Asset created successfully - ID: $asset_id"
         return 0
