@@ -355,8 +355,20 @@ update_asset_custom_fields() {
         log_message "ERROR" "Invalid response when retrieving current asset data"
         return 1
     fi
-    
+    log_message "DEBUG" "Current asset data: $current_asset"
     log_message "DEBUG" "Current asset data retrieved successfully"
+    
+    # Extract current custom field values with proper JSON handling
+    local current_doc=$(echo "$current_asset" | jq -r '._snipeit_documentation_2 // empty')
+    local current_sup=$(echo "$current_asset" | jq -r '._snipeit_supervision_3 // empty')
+    local current_teams=$(echo "$current_asset" | jq -r '._snipeit_teams_11 // empty')
+    local current_roles=$(echo "$current_asset" | jq -r '._snipeit_roles_12 // empty')
+    
+    # Escape the current values for JSON
+    local escaped_doc=$(escape_json_string "$current_doc")
+    local escaped_sup=$(escape_json_string "$current_sup")
+    local escaped_teams=$(escape_json_string "$current_teams")
+    local escaped_roles=$(escape_json_string "$current_roles")
     
     # Escape custom field values for JSON
     local escaped_disks=$(escape_json_string "$DISKS")
@@ -375,10 +387,10 @@ update_asset_custom_fields() {
     "$IP_COLUMN": "$escaped_ip",
     "$OS_COLUMN": "$escaped_os",
     "$SOFTWARE_COLUMN": "$escaped_software",
-    "_snipeit_documentation_2": $(echo "$current_asset" | jq -r '._snipeit_documentation_2 // null'),
-    "_snipeit_supervision_3": $(echo "$current_asset" | jq -r '._snipeit_supervision_3 // null'),
-    "_snipeit_teams_11": $(echo "$current_asset" | jq -r '._snipeit_teams_11 // null'),
-    "_snipeit_roles_12": $(echo "$current_asset" | jq -r '._snipeit_roles_12 // null')
+    "_snipeit_documentation_2": "$escaped_doc",
+    "_snipeit_supervision_3": "$escaped_sup",
+    "_snipeit_teams_11": "$escaped_teams",
+    "_snipeit_roles_12": "$escaped_roles"
 }
 EOF
 )
