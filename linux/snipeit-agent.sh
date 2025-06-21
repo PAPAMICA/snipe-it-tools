@@ -298,7 +298,7 @@ validate_required_params() {
 # Function to set default asset name based on hostname
 set_default_asset_name() {
     if [[ -z "$ASSET_NAME" ]]; then
-        if [[ -n "$HOSTNAME" ]]; then
+        if [[ -n "$HOSTNAME" && "$HOSTNAME" != "Unknown" ]]; then
             ASSET_NAME="$HOSTNAME"
             log_message "INFO" "Using hostname as asset name: $ASSET_NAME"
         else
@@ -306,6 +306,7 @@ set_default_asset_name() {
             local system_hostname=$(hostname 2>/dev/null || echo "")
             if [[ -n "$system_hostname" ]]; then
                 ASSET_NAME="$system_hostname"
+                HOSTNAME="$system_hostname"  # Also set HOSTNAME if it was Unknown
                 log_message "INFO" "Using system hostname as asset name: $ASSET_NAME"
             else
                 log_message "ERROR" "No asset name provided and unable to determine hostname"
@@ -890,9 +891,13 @@ main() {
     # Check if asset exists (unless force create is enabled)
     if [[ "$FORCE_CREATE" != "true" ]]; then
         local existing_asset_id
+        log_message "INFO" "Checking if asset exists with name: '$ASSET_NAME' and tag: '$ASSET_TAG'"
         # Capture only the asset ID from stdout, log messages go to stderr
         existing_asset_id=$(check_asset_exists "$ASSET_TAG" "$ASSET_NAME")
-        if [[ $? -eq 0 && -n "$existing_asset_id" ]]; then
+        local check_result=$?
+        log_message "DEBUG" "Asset existence check result: $check_result, existing_asset_id: '$existing_asset_id'"
+        
+        if [[ $check_result -eq 0 && -n "$existing_asset_id" ]]; then
             log_message "INFO" "Asset already exists (ID: $existing_asset_id). Updating custom fields..."
             if update_asset "$existing_asset_id"; then
                 log_message "SUCCESS" "Asset updated successfully"
@@ -901,6 +906,8 @@ main() {
                 log_message "ERROR" "Failed to update asset"
                 exit 1
             fi
+        else
+            log_message "INFO" "Asset does not exist, will create new asset"
         fi
     else
         log_message "INFO" "Force create enabled, skipping asset existence check"
