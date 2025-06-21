@@ -145,16 +145,16 @@ detect_system_info() {
         
         # Detect package manager and list installed packages
         if command -v dpkg >/dev/null 2>&1; then
-            # Debian/Ubuntu systems - format as clean list with semicolons for JSON compatibility
-            software_list=$(dpkg -l | grep '^ii' | awk '{print $2 " " $3}' | head -20 | sed 's/^/- /' | tr '\n' '; ' | sed 's/; $//')
+            # Debian/Ubuntu systems - format as app (version)
+            software_list=$(dpkg -l | grep '^ii' | awk '{print $2 " (" $3 ")"}' | head -20 | paste -sd ", " -)
             log_message "INFO" "Detected software (Debian/Ubuntu): $software_list"
         elif command -v rpm >/dev/null 2>&1; then
-            # Red Hat/CentOS systems - format as clean list with semicolons
-            software_list=$(rpm -qa --queryformat '%{NAME}-%{VERSION}\n' | head -20 | sed 's/^/- /' | tr '\n' '; ' | sed 's/; $//')
+            # Red Hat/CentOS systems - format as app (version)
+            software_list=$(rpm -qa --queryformat '%{NAME} (%{VERSION})\n' | head -20 | paste -sd ", " -)
             log_message "INFO" "Detected software (Red Hat/CentOS): $software_list"
         elif command -v pacman >/dev/null 2>&1; then
-            # Arch Linux systems - format as clean list with semicolons
-            software_list=$(pacman -Q | head -20 | sed 's/^/- /' | tr '\n' '; ' | sed 's/; $//')
+            # Arch Linux systems - format as app (version)
+            software_list=$(pacman -Q | awk '{print $1 " (" $2 ")"}' | head -20 | paste -sd ", " -)
             log_message "INFO" "Detected software (Arch): $software_list"
         else
             software_list="Unknown package manager"
