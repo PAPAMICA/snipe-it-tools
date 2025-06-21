@@ -450,7 +450,7 @@ create_asset() {
 {
     "name": "$escaped_asset_name",
     "model_id": $model_id,
-    "status_id": 1,
+    "status_id": 2,
     "asset_tag": "$escaped_asset_tag",
     "next_audit_date": "$next_audit_date",
     "$DISKS_COLUMN": "$escaped_disks",
