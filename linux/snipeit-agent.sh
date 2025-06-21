@@ -332,39 +332,57 @@ validate_server_url() {
 get_model_id() {
     local model_name="$1"
     
+    log_message "DEBUG" "Searching for model: $model_name"
+    
     # Try exact search first
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
         "$SNIPEIT_SERVER/api/v1/models?search=$model_name&limit=10")
     
-    if [[ $? -ne 0 ]]; then
+    local curl_exit_code=$?
+    if [[ $curl_exit_code -ne 0 ]]; then
+        log_message "DEBUG" "First curl request failed with exit code: $curl_exit_code"
         return 1
     fi
+    
+    log_message "DEBUG" "First API response received"
     
     local model_id=$(echo "$response" | jq -r '.rows[0].id // empty')
     local model_name_found=$(echo "$response" | jq -r '.rows[0].name // empty')
     
+    log_message "DEBUG" "First search - model_id: '$model_id', model_name_found: '$model_name_found'"
+    
     if [[ -z "$model_id" || "$model_id" == "null" ]]; then
+        log_message "DEBUG" "Model not found in first search, trying without search parameter"
+        
         # Try without search parameter to get all models
         response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
             "$SNIPEIT_SERVER/api/v1/models?limit=50")
         
-        if [[ $? -ne 0 ]]; then
+        curl_exit_code=$?
+        if [[ $curl_exit_code -ne 0 ]]; then
+            log_message "DEBUG" "Second curl request failed with exit code: $curl_exit_code"
             return 1
         fi
+        
+        log_message "DEBUG" "Second API response received"
         
         # Use jq to find exact match
         model_id=$(echo "$response" | jq -r --arg name "$model_name" '.rows[] | select(.name == $name) | .id' 2>/dev/null | head -1)
         model_name_found="$model_name"
+        
+        log_message "DEBUG" "Second search - model_id: '$model_id'"
     fi
     
     if [[ -z "$model_id" || "$model_id" == "null" ]]; then
+        log_message "DEBUG" "Model not found in either search"
         return 1
     fi
     
+    log_message "DEBUG" "Model found successfully: $model_name (ID: $model_id)"
     # Return only the clean model ID
     printf "%s" "$model_id"
 }
@@ -373,12 +391,18 @@ get_model_id() {
 get_model_id_with_logging() {
     local model_name="$1"
     
-    log_message "INFO" "Getting model ID: $model_name"
+    log_message "INFO" "Getting model ID for: $model_name"
     
     # Get the model ID without any logging
     local model_id=$(get_model_id "$model_name")
-    if [[ $? -ne 0 || -z "$model_id" ]]; then
-        log_message "ERROR" "Model '$model_name' not found"
+    local get_result=$?
+    
+    log_message "DEBUG" "get_model_id exit code: $get_result"
+    log_message "DEBUG" "get_model_id returned: '$model_id'"
+    
+    if [[ $get_result -ne 0 || -z "$model_id" || "$model_id" == "null" ]]; then
+        log_message "ERROR" "Model '$model_name' not found in Snipe-IT"
+        log_message "INFO" "Available models can be checked via the Snipe-IT web interface"
         return 1
     fi
     
@@ -907,7 +931,7 @@ main() {
                 exit 1
             fi
         else
-            log_message "INFO" "Asset does not exist, will create new asset"
+            log_message "INFO" "Asset does not exist, proceeding to create new asset"
         fi
     else
         log_message "INFO" "Force create enabled, skipping asset existence check"
@@ -922,19 +946,25 @@ main() {
     
     if [[ $model_result -ne 0 || -z "$model_id" ]]; then
         log_message "ERROR" "Unable to get model ID for: $MODEL_NAME"
+        log_message "INFO" "Please check that the model exists in Snipe-IT or use a different model name"
         exit 1
     fi
     
-    log_message "INFO" "Using model ID: $model_id"
+    log_message "SUCCESS" "Model found with ID: $model_id"
     
-    # Get other IDs
+    # Get other IDs (these functions return empty string if not found, which is OK)
     log_message "INFO" "Getting other IDs..."
     local company_id=$(get_company_id)
     local location_id=$(get_location_id)
     local department_id=$(get_department_id)
     local supplier_id=$(get_supplier_id)
     
-    log_message "INFO" "Creating asset..."
+    log_message "DEBUG" "Company ID: '$company_id'"
+    log_message "DEBUG" "Location ID: '$location_id'"
+    log_message "DEBUG" "Department ID: '$department_id'"
+    log_message "DEBUG" "Supplier ID: '$supplier_id'"
+    
+    log_message "INFO" "Creating asset with name: $ASSET_NAME"
     # Create asset with explicit model_id
     if create_asset "$model_id" "$company_id" "$location_id" "$department_id" "$supplier_id"; then
         log_message "SUCCESS" "Asset created successfully in SnipeIT"
