@@ -201,6 +201,7 @@ OPTIONS:
     -i, --invoice-number INVOICE Invoice number (optional)
     --auto-install          Automatic dependency installation (curl, jq)
     --no-auto-detect        Disable automatic system information detection
+    --no-custom-fields      Skip custom field column name retrieval (use defaults)
     --force-update          Force update of existing assets (update custom fields)
     -v, --verbose           Verbose mode
     -h, --help             Show this help
@@ -242,6 +243,8 @@ EXAMPLES:
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-auto-detect
 
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell OptiPlex 7090" --force-update --hostname "pc001.company.com" --ip-address "192.168.1.100"
+
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-custom-fields --no-auto-detect
 
 EOF
 }
@@ -548,12 +551,44 @@ get_custom_field_columns() {
         return 1
     fi
     
-    # Parse custom fields and find the ones we need
-    local fields_json=$(echo "$response" | jq -r '.rows // empty')
-    if [[ -z "$fields_json" || "$fields_json" == "null" ]]; then
-        log_message "WARNING" "No custom fields found, using default column names"
+    log_message "DEBUG" "Custom fields API response: $response"
+    
+    # Try different response formats
+    local fields_json=""
+    
+    # Try .rows format first
+    fields_json=$(echo "$response" | jq -r '.rows // empty')
+    if [[ -n "$fields_json" && "$fields_json" != "null" ]]; then
+        log_message "DEBUG" "Found custom fields in .rows format"
+    else
+        # Try direct array format
+        fields_json=$(echo "$response" | jq -r '. // empty')
+        if [[ -n "$fields_json" && "$fields_json" != "null" ]]; then
+            log_message "DEBUG" "Found custom fields in direct array format"
+        else
+            # Try .data format
+            fields_json=$(echo "$response" | jq -r '.data // empty')
+            if [[ -n "$fields_json" && "$fields_json" != "null" ]]; then
+                log_message "DEBUG" "Found custom fields in .data format"
+            else
+                log_message "WARNING" "No custom fields found in any format, using default column names"
+                log_message "DEBUG" "Response structure: $(echo "$response" | jq -r 'keys // empty')"
+                return 1
+            fi
+        fi
+    fi
+    
+    # Check if fields_json is an array
+    local is_array=$(echo "$fields_json" | jq -r 'if type == "array" then "true" else "false" end')
+    if [[ "$is_array" != "true" ]]; then
+        log_message "WARNING" "Custom fields response is not an array, using default column names"
+        log_message "DEBUG" "Fields JSON type: $(echo "$fields_json" | jq -r 'type')"
         return 1
     fi
+    
+    # List all available custom fields for debugging
+    log_message "DEBUG" "Available custom fields:"
+    echo "$fields_json" | jq -r '.[] | "  - \(.name) (db_column: \(.db_column_name // "null"))"' >&2
     
     # Extract column names for our fields
     DISKS_COLUMN=$(echo "$fields_json" | jq -r '.[] | select(.name == "Disque(s)") | .db_column_name // empty')
@@ -581,6 +616,36 @@ get_custom_field_columns() {
     log_message "DEBUG" "  IP: $IP_COLUMN"
     log_message "DEBUG" "  OS: $OS_COLUMN"
     log_message "DEBUG" "  Software: $SOFTWARE_COLUMN"
+}
+
+# Function to get custom field column names from models endpoint (fallback)
+get_custom_field_columns_from_models() {
+    log_message "INFO" "Trying to get custom field column names from models endpoint..."
+    
+    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/models?limit=1")
+    
+    if [[ $? -ne 0 ]]; then
+        log_message "WARNING" "Error getting models for custom fields"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Models API response for custom fields: $response"
+    
+    # Try to extract custom fields from the first model
+    local model_fields=$(echo "$response" | jq -r '.rows[0].fieldset // empty')
+    if [[ -n "$model_fields" && "$model_fields" != "null" ]]; then
+        log_message "DEBUG" "Found custom fields in model fieldset: $model_fields"
+        
+        # Parse the fieldset to get custom field information
+        # This is a more complex approach and may need adjustment based on actual API response
+        return 0
+    fi
+    
+    log_message "WARNING" "No custom fields found in models endpoint"
+    return 1
 }
 
 # Function to update asset custom fields
@@ -902,7 +967,15 @@ main() {
     calculate_dates
     
     # Get custom field column names
-    get_custom_field_columns
+    if [[ "$NO_CUSTOM_FIELDS" != "true" ]]; then
+        get_custom_field_columns
+        if [[ $? -ne 0 ]]; then
+            log_message "INFO" "Trying alternative method to get custom field columns..."
+            get_custom_field_columns_from_models
+        fi
+    else
+        log_message "INFO" "Skipping custom field column name retrieval (using defaults)"
+    fi
     
     # Check if asset exists
     local existing_asset_id
@@ -981,6 +1054,7 @@ VERBOSE="false"
 AUTO_INSTALL="false"
 NO_AUTO_DETECT="false"
 FORCE_UPDATE="false"
+NO_CUSTOM_FIELDS="false"
 
 # Custom field column names (will be populated by get_custom_field_columns)
 DISKS_COLUMN=""
@@ -1080,6 +1154,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-auto-detect)
             NO_AUTO_DETECT="true"
+            shift
+            ;;
+        --no-custom-fields)
+            NO_CUSTOM_FIELDS="true"
             shift
             ;;
         --force-update)
