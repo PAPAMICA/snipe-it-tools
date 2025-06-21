@@ -897,7 +897,7 @@ main() {
         local check_result=$?
         log_message "DEBUG" "Asset existence check result: $check_result, existing_asset_id: '$existing_asset_id'"
         
-        if [[ $check_result -eq 0 && -n "$existing_asset_id" ]]; then
+        if [[ $check_result -eq 0 && -n "$existing_asset_id" && "$existing_asset_id" != "null" ]]; then
             log_message "INFO" "Asset already exists (ID: $existing_asset_id). Updating custom fields..."
             if update_asset "$existing_asset_id"; then
                 log_message "SUCCESS" "Asset updated successfully"
