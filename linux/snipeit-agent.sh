@@ -338,57 +338,19 @@ update_asset_custom_fields() {
     
     log_message "INFO" "Updating custom fields for asset ID: $asset_id"
     
-    # First, get current asset data to preserve existing custom fields
-    log_message "DEBUG" "Retrieving current asset data..."
-    local current_response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "ERROR" "Failed to retrieve current asset data"
-        return 1
-    fi
-    
-    local current_asset=$(echo "$current_response" | jq -r '. // empty')
-    if [[ -z "$current_asset" || "$current_asset" == "null" ]]; then
-        log_message "ERROR" "Invalid response when retrieving current asset data"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Current asset data retrieved successfully"
-    
-    # Extract existing custom field values to preserve them
-    local existing_disks=$(echo "$current_asset" | jq -r ".$DISKS_COLUMN // empty")
-    local existing_memory=$(echo "$current_asset" | jq -r ".$MEMORY_COLUMN // empty")
-    local existing_vcpu=$(echo "$current_asset" | jq -r ".$VCPU_COLUMN // empty")
-    local existing_hostname=$(echo "$current_asset" | jq -r ".$HOSTNAME_COLUMN // empty")
-    local existing_ip=$(echo "$current_asset" | jq -r ".$IP_COLUMN // empty")
-    local existing_os=$(echo "$current_asset" | jq -r ".$OS_COLUMN // empty")
-    local existing_software=$(echo "$current_asset" | jq -r ".$SOFTWARE_COLUMN // empty")
-    
-    # Use new values if provided, otherwise keep existing values
-    local final_disks="${DISKS:-$existing_disks}"
-    local final_memory="${MEMORY:-$existing_memory}"
-    local final_vcpu="${VCPU:-$existing_vcpu}"
-    local final_hostname="${HOSTNAME:-$existing_hostname}"
-    local final_ip="${IP_ADDRESS:-$existing_ip}"
-    local final_os="${OS:-$existing_os}"
-    local final_software="${SOFTWARE:-$existing_software}"
-    
     # Escape custom field values for JSON
-    local escaped_disks=$(escape_json_string "$final_disks")
-    local escaped_hostname=$(escape_json_string "$final_hostname")
-    local escaped_ip=$(escape_json_string "$final_ip")
-    local escaped_os=$(escape_json_string "$final_os")
-    local escaped_software=$(escape_json_string "$final_software")
+    local escaped_disks=$(escape_json_string "$DISKS")
+    local escaped_hostname=$(escape_json_string "$HOSTNAME")
+    local escaped_ip=$(escape_json_string "$IP_ADDRESS")
+    local escaped_os=$(escape_json_string "$OS")
+    local escaped_software=$(escape_json_string "$SOFTWARE")
     
     # Build JSON for custom fields update - only include fields we actually use
     local update_data=$(cat << EOF
 {
     "$DISKS_COLUMN": "$escaped_disks",
-    "$MEMORY_COLUMN": $final_memory,
-    "$VCPU_COLUMN": $final_vcpu,
+    "$MEMORY_COLUMN": $MEMORY,
+    "$VCPU_COLUMN": $VCPU,
     "$HOSTNAME_COLUMN": "$escaped_hostname",
     "$IP_COLUMN": "$escaped_ip",
     "$OS_COLUMN": "$escaped_os",
@@ -410,7 +372,7 @@ EOF
         -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
-        -X PATCH \
+        -X PUT \
         -d "$update_data" \
         "$SNIPEIT_SERVER/api/v1/hardware/$asset_id" 2>&1)
     
