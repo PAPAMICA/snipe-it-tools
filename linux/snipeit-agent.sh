@@ -338,26 +338,6 @@ update_asset_custom_fields() {
     
     log_message "INFO" "Updating custom fields for asset ID: $asset_id"
     
-    # First, get current asset data
-    log_message "DEBUG" "Retrieving current asset data..."
-    local current_response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "ERROR" "Failed to retrieve current asset data"
-        return 1
-    fi
-    
-    local current_asset=$(echo "$current_response" | jq -r '. // empty')
-    if [[ -z "$current_asset" || "$current_asset" == "null" ]]; then
-        log_message "ERROR" "Invalid response when retrieving current asset data"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Current asset data retrieved successfully"
-    
     # Escape custom field values for JSON
     local escaped_disks=$(escape_json_string "$DISKS")
     local escaped_hostname=$(escape_json_string "$HOSTNAME")
@@ -365,47 +345,35 @@ update_asset_custom_fields() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Create updated asset data by modifying only our fields
-    local updated_asset=$(echo "$current_asset" | jq --arg disks "$escaped_disks" \
-        --arg hostname "$escaped_hostname" \
-        --arg ip "$escaped_ip" \
-        --arg os "$escaped_os" \
-        --arg software "$escaped_software" \
-        --argjson memory "$MEMORY" \
-        --argjson vcpu "$VCPU" \
-        --arg disks_col "$DISKS_COLUMN" \
-        --arg memory_col "$MEMORY_COLUMN" \
-        --arg vcpu_col "$VCPU_COLUMN" \
-        --arg hostname_col "$HOSTNAME_COLUMN" \
-        --arg ip_col "$IP_COLUMN" \
-        --arg os_col "$OS_COLUMN" \
-        --arg software_col "$SOFTWARE_COLUMN" \
-        ".[\$disks_col] = \$disks | 
-         .[\$memory_col] = \$memory | 
-         .[\$vcpu_col] = \$vcpu | 
-         .[\$hostname_col] = \$hostname | 
-         .[\$ip_col] = \$ip | 
-         .[\$os_col] = \$os | 
-         .[\$software_col] = \$software |
-         del(.image) |
-         del(.last_checkout) |
-         del(.next_audit_date) |
-         del(.assigned_to) |
-         del(.assigned_type)")
+    # Build JSON for custom fields update - only include fields we actually use
+    local update_data=$(cat << EOF
+{
+    "$DISKS_COLUMN": "$escaped_disks",
+    "$MEMORY_COLUMN": $MEMORY,
+    "$VCPU_COLUMN": $VCPU,
+    "$HOSTNAME_COLUMN": "$escaped_hostname",
+    "$IP_COLUMN": "$escaped_ip",
+    "$OS_COLUMN": "$escaped_os",
+    "$SOFTWARE_COLUMN": "$escaped_software"
+}
+EOF
+)
     
-    if [[ $? -ne 0 ]]; then
-        log_message "ERROR" "Failed to update asset data with jq"
+    # Validate JSON before sending
+    if ! echo "$update_data" | jq . >/dev/null 2>&1; then
+        log_message "ERROR" "Invalid JSON generated for asset update:"
+        log_message "ERROR" "$update_data"
         return 1
     fi
     
-    log_message "DEBUG" "Updated asset data prepared"
+    log_message "DEBUG" "Asset update data: $update_data"
     
     local response=$(curl -s -w "\n%{http_code}" \
         -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
         -X PUT \
-        -d "$updated_asset" \
+        -d "$update_data" \
         "$SNIPEIT_SERVER/api/v1/hardware/$asset_id" 2>&1)
     
     local curl_exit_code=$?
