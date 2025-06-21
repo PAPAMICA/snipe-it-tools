@@ -365,34 +365,24 @@ update_asset_custom_fields() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Build JSON for custom fields update - only include fields that exist in the current asset
-    local update_data="{"
-    
-    # Add our managed fields
-    update_data+="\"$DISKS_COLUMN\": \"$escaped_disks\","
-    update_data+="\"$MEMORY_COLUMN\": $MEMORY,"
-    update_data+="\"$VCPU_COLUMN\": $VCPU,"
-    update_data+="\"$HOSTNAME_COLUMN\": \"$escaped_hostname\","
-    update_data+="\"$IP_COLUMN\": \"$escaped_ip\","
-    update_data+="\"$OS_COLUMN\": \"$escaped_os\","
-    update_data+="\"$SOFTWARE_COLUMN\": \"$escaped_software\""
-    
-    # Add other custom fields only if they exist in the current asset
-    local other_fields=("_snipeit_mac_address_1" "_snipeit_documentation_2" "_snipeit_supervision_3" "_snipeit_teams_11" "_snipeit_roles_12")
-    
-    for field in "${other_fields[@]}"; do
-        local field_value=$(echo "$current_asset" | jq -r ".$field // empty")
-        if [[ -n "$field_value" && "$field_value" != "null" ]]; then
-            # Escape the field value for JSON
-            local escaped_value=$(echo "$field_value" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-            update_data+=",\"$field\": \"$escaped_value\""
-            log_message "DEBUG" "Including existing field: $field = $field_value"
-        else
-            log_message "DEBUG" "Skipping field not present in asset: $field"
-        fi
-    done
-    
-    update_data+="}"
+    # Build JSON for custom fields update - include all custom fields with current values
+    local update_data=$(cat << EOF
+{
+    "$DISKS_COLUMN": "$escaped_disks",
+    "$MEMORY_COLUMN": $MEMORY,
+    "$VCPU_COLUMN": $VCPU,
+    "$HOSTNAME_COLUMN": "$escaped_hostname",
+    "$IP_COLUMN": "$escaped_ip",
+    "$OS_COLUMN": "$escaped_os",
+    "$SOFTWARE_COLUMN": "$escaped_software",
+    "_snipeit_mac_address_1": $(echo "$current_asset" | jq -r '._snipeit_mac_address_1 // null'),
+    "_snipeit_documentation_2": $(echo "$current_asset" | jq -r '._snipeit_documentation_2 // null'),
+    "_snipeit_supervision_3": $(echo "$current_asset" | jq -r '._snipeit_supervision_3 // null'),
+    "_snipeit_teams_11": $(echo "$current_asset" | jq -r '._snipeit_teams_11 // null'),
+    "_snipeit_roles_12": $(echo "$current_asset" | jq -r '._snipeit_roles_12 // null')
+}
+EOF
+)
     
     # Validate JSON before sending
     if ! echo "$update_data" | jq . >/dev/null 2>&1; then
