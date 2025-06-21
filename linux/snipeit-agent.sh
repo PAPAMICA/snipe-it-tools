@@ -189,7 +189,7 @@ OPTIONS:
     -s, --server URL        SnipeIT server URL (required)
     -t, --token TOKEN       SnipeIT API token (required)
     -m, --model MODEL       Asset model name (required)
-    -n, --name NAME         Asset name (required)
+    -n, --name NAME         Asset name (optional, defaults to hostname)
     -a, --asset-tag TAG     Asset tag (optional)
     -c, --company COMPANY   Company name (optional)
     -l, --location LOCATION Location name (optional)
@@ -224,7 +224,9 @@ EXAMPLES:
 
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "HP ProBook 450" -n "LAPTOP-001" --hostname "laptop001.company.com" --ip-address "192.168.1.101" --memory 32 --vcpu 16 --os "Windows 11" --disks "SSD 512GB" --software "Office 365, Chrome, Firefox"
 
-    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell PowerEdge R740" -n "SRV-PROD-01" --auto-install
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell PowerEdge R740" --hostname "srv-prod-01.company.com" --auto-install
+
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell PowerEdge R740" --auto-install
 
 EOF
 }
@@ -264,13 +266,33 @@ validate_required_params() {
     [[ -z "$SNIPEIT_SERVER" ]] && missing_params+=("SnipeIT server")
     [[ -z "$API_TOKEN" ]] && missing_params+=("API token")
     [[ -z "$MODEL_NAME" ]] && missing_params+=("model name")
-    [[ -z "$ASSET_NAME" ]] && missing_params+=("asset name")
     
     if [[ ${#missing_params[@]} -gt 0 ]]; then
         log_message "ERROR" "Missing parameters: ${missing_params[*]}"
         echo
         show_help
         exit 1
+    fi
+}
+
+# Function to set default asset name based on hostname
+set_default_asset_name() {
+    if [[ -z "$ASSET_NAME" ]]; then
+        if [[ -n "$HOSTNAME" ]]; then
+            ASSET_NAME="$HOSTNAME"
+            log_message "INFO" "Using hostname as asset name: $ASSET_NAME"
+        else
+            # Try to get hostname from system
+            local system_hostname=$(hostname 2>/dev/null || echo "")
+            if [[ -n "$system_hostname" ]]; then
+                ASSET_NAME="$system_hostname"
+                log_message "INFO" "Using system hostname as asset name: $ASSET_NAME"
+            else
+                log_message "ERROR" "No asset name provided and unable to determine hostname"
+                log_message "INFO" "Please provide an asset name with --name option or hostname with --hostname option"
+                exit 1
+            fi
+        fi
     fi
 }
 
@@ -536,6 +558,9 @@ main() {
     # Validate parameters
     validate_required_params
     validate_server_url
+    
+    # Set default asset name if not provided
+    set_default_asset_name
     
     # Calculate dates
     calculate_dates
