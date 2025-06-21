@@ -914,9 +914,13 @@ main() {
     fi
     
     # Get model ID
+    log_message "INFO" "Getting model ID for: $MODEL_NAME"
     local model_id
     model_id=$(get_model_id "$MODEL_NAME")
-    if [[ $? -ne 0 || -z "$model_id" ]]; then
+    local model_result=$?
+    log_message "DEBUG" "Model ID result: $model_result, model_id: '$model_id'"
+    
+    if [[ $model_result -ne 0 || -z "$model_id" ]]; then
         log_message "ERROR" "Unable to get model ID for: $MODEL_NAME"
         exit 1
     fi
@@ -924,11 +928,13 @@ main() {
     log_message "INFO" "Using model ID: $model_id"
     
     # Get other IDs
+    log_message "INFO" "Getting other IDs..."
     local company_id=$(get_company_id)
     local location_id=$(get_location_id)
     local department_id=$(get_department_id)
     local supplier_id=$(get_supplier_id)
     
+    log_message "INFO" "Creating asset..."
     # Create asset with explicit model_id
     if create_asset "$model_id" "$company_id" "$location_id" "$department_id" "$supplier_id"; then
         log_message "SUCCESS" "Asset created successfully in SnipeIT"
