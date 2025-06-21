@@ -338,25 +338,6 @@ update_asset_custom_fields() {
     
     log_message "INFO" "Updating custom fields for asset ID: $asset_id"
     
-    # First, get the existing asset to preserve other custom fields
-    local get_response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/json" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
-    
-    if [[ $? -ne 0 ]]; then
-        log_message "ERROR" "Failed to retrieve existing asset"
-        return 1
-    fi
-    
-    local existing_asset=$(echo "$get_response" | jq -r '. // empty')
-    if [[ -z "$existing_asset" || "$existing_asset" == "null" ]]; then
-        log_message "ERROR" "Failed to retrieve existing asset data"
-        return 1
-    fi
-    
-    log_message "DEBUG" "Retrieved existing asset data"
-    
     # Escape custom field values for JSON
     local escaped_disks=$(escape_json_string "$DISKS")
     local escaped_hostname=$(escape_json_string "$HOSTNAME")
@@ -364,62 +345,47 @@ update_asset_custom_fields() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Start with existing asset data and only update our managed fields
-    local update_data=$(echo "$existing_asset" | jq -r '.')
+    # Build JSON for custom fields update - only include fields we manage
+    local update_data="{}"
     
-    # Only update fields that have values and are managed by this script
+    # Only add fields that have values and are managed by this script
     if [[ -n "$DISKS" ]]; then
-        update_data=$(echo "$update_data" | jq --arg col "$DISKS_COLUMN" --arg val "$escaped_disks" '. + {($col): $val}')
+        update_data=$(echo "$update_data" | jq --arg field "$DISKS_COLUMN" --arg value "$escaped_disks" '. + {($field): $value}')
     fi
     
     if [[ -n "$MEMORY" ]]; then
-        update_data=$(echo "$update_data" | jq --arg col "$MEMORY_COLUMN" --arg val "$MEMORY" '. + {($col): ($val | tonumber)}')
+        update_data=$(echo "$update_data" | jq --arg field "$MEMORY_COLUMN" --argjson value "$MEMORY" '. + {($field): $value}')
     fi
     
     if [[ -n "$VCPU" ]]; then
-        update_data=$(echo "$update_data" | jq --arg col "$VCPU_COLUMN" --arg val "$VCPU" '. + {($col): ($val | tonumber)}')
+        update_data=$(echo "$update_data" | jq --arg field "$VCPU_COLUMN" --argjson value "$VCPU" '. + {($field): $value}')
     fi
     
     if [[ -n "$HOSTNAME" ]]; then
-        update_data=$(echo "$update_data" | jq --arg col "$HOSTNAME_COLUMN" --arg val "$escaped_hostname" '. + {($col): $val}')
+        update_data=$(echo "$update_data" | jq --arg field "$HOSTNAME_COLUMN" --arg value "$escaped_hostname" '. + {($field): $value}')
     fi
     
     if [[ -n "$IP_ADDRESS" ]]; then
-        update_data=$(echo "$update_data" | jq --arg col "$IP_COLUMN" --arg val "$escaped_ip" '. + {($col): $val}')
+        update_data=$(echo "$update_data" | jq --arg field "$IP_COLUMN" --arg value "$escaped_ip" '. + {($field): $value}')
     fi
     
     if [[ -n "$OS" ]]; then
-        update_data=$(echo "$update_data" | jq --arg col "$OS_COLUMN" --arg val "$escaped_os" '. + {($col): $val}')
+        update_data=$(echo "$update_data" | jq --arg field "$OS_COLUMN" --arg value "$escaped_os" '. + {($field): $value}')
     fi
     
     if [[ -n "$SOFTWARE" ]]; then
-        update_data=$(echo "$update_data" | jq --arg col "$SOFTWARE_COLUMN" --arg val "$escaped_software" '. + {($col): $val}')
+        update_data=$(echo "$update_data" | jq --arg field "$SOFTWARE_COLUMN" --arg value "$escaped_software" '. + {($field): $value}')
     fi
     
-    # Validate JSON before sending
-    if ! echo "$update_data" | jq . >/dev/null 2>&1; then
-        log_message "ERROR" "Invalid JSON generated for asset update:"
-        log_message "ERROR" "$update_data"
-        return 1
-    fi
+    log_message "DEBUG" "Update data: $update_data"
     
-    log_message "DEBUG" "Asset update data: $update_data"
-    
-    local response=$(curl -s -w "\n%{http_code}" \
-        -H "Authorization: Bearer $API_TOKEN" \
+    # Send PATCH request to update only custom fields
+    local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
-        -X PUT \
+        -X PATCH \
         -d "$update_data" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id" 2>&1)
-    
-    local curl_exit_code=$?
-    
-    if [[ $curl_exit_code -ne 0 ]]; then
-        log_message "ERROR" "Curl command failed with exit code: $curl_exit_code"
-        log_message "ERROR" "Curl error output: $response"
-        return 1
-    fi
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
     
     local http_code=$(echo "$response" | tail -n1)
     local response_body=$(echo "$response" | head -n -1)
@@ -427,23 +393,13 @@ update_asset_custom_fields() {
     log_message "DEBUG" "Update response HTTP code: $http_code"
     log_message "DEBUG" "Update response body: $response_body"
     
-    if [[ $http_code -eq 200 ]]; then
-        local status=$(echo "$response_body" | jq -r '.status // empty')
-        if [[ "$status" == "success" ]]; then
-            log_message "SUCCESS" "Asset custom fields updated successfully"
-            return 0
-        else
-            local error_message=$(echo "$response_body" | jq -r '.messages // .message // "Unknown error"')
-            log_message "ERROR" "API returned error status: $status"
-            log_message "ERROR" "Error message: $error_message"
-            return 1
-        fi
-    elif [[ $http_code -eq 201 ]]; then
-        log_message "SUCCESS" "Asset custom fields updated successfully"
+    if [[ "$http_code" == "200" ]]; then
+        log_message "INFO" "Successfully updated custom fields for asset ID: $asset_id"
         return 0
     else
-        log_message "ERROR" "Error updating asset custom fields - HTTP Code: $http_code"
-        log_message "ERROR" "Response: $response_body"
+        log_message "ERROR" "API returned error status: $(echo "$response_body" | jq -r '.status // "unknown"')"
+        log_message "ERROR" "Error message: $response_body"
+        log_message "ERROR" "Failed to update asset custom fields"
         return 1
     fi
 }
