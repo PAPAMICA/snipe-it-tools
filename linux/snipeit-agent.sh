@@ -338,6 +338,25 @@ update_asset_custom_fields() {
     
     log_message "INFO" "Updating custom fields for asset ID: $asset_id"
     
+    # First, get the existing asset to preserve other custom fields
+    local get_response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
+    
+    if [[ $? -ne 0 ]]; then
+        log_message "ERROR" "Failed to retrieve existing asset"
+        return 1
+    fi
+    
+    local existing_asset=$(echo "$get_response" | jq -r '. // empty')
+    if [[ -z "$existing_asset" || "$existing_asset" == "null" ]]; then
+        log_message "ERROR" "Failed to retrieve existing asset data"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Retrieved existing asset data"
+    
     # Escape custom field values for JSON
     local escaped_disks=$(escape_json_string "$DISKS")
     local escaped_hostname=$(escape_json_string "$HOSTNAME")
@@ -345,10 +364,10 @@ update_asset_custom_fields() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Build JSON for custom fields update - only include fields we manage
-    local update_data="{}"
+    # Start with existing asset data and only update our managed fields
+    local update_data=$(echo "$existing_asset" | jq -r '.')
     
-    # Only add fields that have values and are managed by this script
+    # Only update fields that have values and are managed by this script
     if [[ -n "$DISKS" ]]; then
         update_data=$(echo "$update_data" | jq --arg col "$DISKS_COLUMN" --arg val "$escaped_disks" '. + {($col): $val}')
     fi
