@@ -916,7 +916,7 @@ main() {
     # Get model ID
     log_message "INFO" "Getting model ID for: $MODEL_NAME"
     local model_id
-    model_id=$(get_model_id "$MODEL_NAME")
+    model_id=$(get_model_id_with_logging "$MODEL_NAME")
     local model_result=$?
     log_message "DEBUG" "Model ID result: $model_result, model_id: '$model_id'"
     
