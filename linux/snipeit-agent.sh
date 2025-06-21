@@ -153,12 +153,12 @@ calculate_dates() {
     if command -v date >/dev/null 2>&1; then
         # Try GNU date (Linux standard)
         AUDIT_DATE=$(date -d "+1 year" +%Y-%m-%d 2>/dev/null || echo "")
-        EXPECTED_CHECKIN_DATE=$(date -d "+2 days" +%Y-%m-%d 2>/dev/null || echo "")
+        EXPECTED_CHECKIN_DATE=$(date +%Y-%m-%d 2>/dev/null || echo "")
         
         # If GNU date failed, try BSD date (macOS)
         if [[ -z "$AUDIT_DATE" ]]; then
             AUDIT_DATE=$(date -v+1y +%Y-%m-%d 2>/dev/null || echo "")
-            EXPECTED_CHECKIN_DATE=$(date -v+2d +%Y-%m-%d 2>/dev/null || echo "")
+            EXPECTED_CHECKIN_DATE=$(date +%Y-%m-%d 2>/dev/null || echo "")
         fi
         
         # If everything failed, use current date
@@ -391,7 +391,7 @@ get_company_id() {
         return 0
     fi
     
-    log_message "INFO" "Getting company ID: $COMPANY_NAME"
+    log_message "INFO" "Getting company ID: $COMPANY_NAME" >&2
     
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
@@ -399,19 +399,19 @@ get_company_id() {
         "$SNIPEIT_SERVER/api/v1/companies?search=$COMPANY_NAME&limit=1")
     
     if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting company"
+        log_message "WARNING" "Error getting company" >&2
         return 0
     fi
     
     local company_id=$(echo "$response" | jq -r '.rows[0].id // empty')
     
     if [[ -z "$company_id" || "$company_id" == "null" ]]; then
-        log_message "WARNING" "Company '$COMPANY_NAME' not found"
+        log_message "WARNING" "Company '$COMPANY_NAME' not found" >&2
         return 0
     fi
     
-    log_message "SUCCESS" "Company found with ID: $company_id"
-    echo "$company_id"
+    log_message "SUCCESS" "Company found with ID: $company_id" >&2
+    printf "%s" "$company_id"
 }
 
 # Function to get location ID
@@ -420,7 +420,7 @@ get_location_id() {
         return 0
     fi
     
-    log_message "INFO" "Getting location ID: $LOCATION_NAME"
+    log_message "INFO" "Getting location ID: $LOCATION_NAME" >&2
     
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
@@ -428,19 +428,19 @@ get_location_id() {
         "$SNIPEIT_SERVER/api/v1/locations?search=$LOCATION_NAME&limit=1")
     
     if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting location"
+        log_message "WARNING" "Error getting location" >&2
         return 0
     fi
     
     local location_id=$(echo "$response" | jq -r '.rows[0].id // empty')
     
     if [[ -z "$location_id" || "$location_id" == "null" ]]; then
-        log_message "WARNING" "Location '$LOCATION_NAME' not found"
+        log_message "WARNING" "Location '$LOCATION_NAME' not found" >&2
         return 0
     fi
     
-    log_message "SUCCESS" "Location found with ID: $location_id"
-    echo "$location_id"
+    log_message "SUCCESS" "Location found with ID: $location_id" >&2
+    printf "%s" "$location_id"
 }
 
 # Function to get department ID
@@ -449,7 +449,7 @@ get_department_id() {
         return 0
     fi
     
-    log_message "INFO" "Getting department ID: $DEPARTMENT_NAME"
+    log_message "INFO" "Getting department ID: $DEPARTMENT_NAME" >&2
     
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
@@ -457,19 +457,19 @@ get_department_id() {
         "$SNIPEIT_SERVER/api/v1/departments?search=$DEPARTMENT_NAME&limit=1")
     
     if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting department"
+        log_message "WARNING" "Error getting department" >&2
         return 0
     fi
     
     local department_id=$(echo "$response" | jq -r '.rows[0].id // empty')
     
     if [[ -z "$department_id" || "$department_id" == "null" ]]; then
-        log_message "WARNING" "Department '$DEPARTMENT_NAME' not found"
+        log_message "WARNING" "Department '$DEPARTMENT_NAME' not found" >&2
         return 0
     fi
     
-    log_message "SUCCESS" "Department found with ID: $department_id"
-    echo "$department_id"
+    log_message "SUCCESS" "Department found with ID: $department_id" >&2
+    printf "%s" "$department_id"
 }
 
 # Function to get supplier ID
@@ -478,7 +478,7 @@ get_supplier_id() {
         return 0
     fi
     
-    log_message "INFO" "Getting supplier ID: $SUPPLIER_NAME"
+    log_message "INFO" "Getting supplier ID: $SUPPLIER_NAME" >&2
     
     local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
@@ -486,19 +486,19 @@ get_supplier_id() {
         "$SNIPEIT_SERVER/api/v1/suppliers?search=$SUPPLIER_NAME&limit=1")
     
     if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error getting supplier"
+        log_message "WARNING" "Error getting supplier" >&2
         return 0
     fi
     
     local supplier_id=$(echo "$response" | jq -r '.rows[0].id // empty')
     
     if [[ -z "$supplier_id" || "$supplier_id" == "null" ]]; then
-        log_message "WARNING" "Supplier '$SUPPLIER_NAME' not found"
+        log_message "WARNING" "Supplier '$SUPPLIER_NAME' not found" >&2
         return 0
     fi
     
-    log_message "SUCCESS" "Supplier found with ID: $supplier_id"
-    echo "$supplier_id"
+    log_message "SUCCESS" "Supplier found with ID: $supplier_id" >&2
+    printf "%s" "$supplier_id"
 }
 
 # Function to update existing asset
@@ -506,6 +506,16 @@ update_asset() {
     local asset_id="$1"
     
     log_message "INFO" "Updating existing asset: $ASSET_NAME (ID: $asset_id)"
+    
+    # Debug custom field values
+    log_message "DEBUG" "Custom field values:"
+    log_message "DEBUG" "  Disks: '$DISKS'"
+    log_message "DEBUG" "  Memory: '$MEMORY'"
+    log_message "DEBUG" "  vCPU: '$VCPU'"
+    log_message "DEBUG" "  Hostname: '$HOSTNAME'"
+    log_message "DEBUG" "  IP Address: '$IP_ADDRESS'"
+    log_message "DEBUG" "  OS: '$OS'"
+    log_message "DEBUG" "  Software: '$SOFTWARE'"
     
     # Build JSON for asset update (only custom fields)
     local asset_data=$(cat << EOF
@@ -539,8 +549,18 @@ EOF
         -d "$asset_data" \
         "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
     
+    local curl_exit_code=$?
     local http_code=$(echo "$response" | tail -n1)
     local response_body=$(echo "$response" | head -n -1)
+    
+    log_message "DEBUG" "Curl exit code: $curl_exit_code"
+    log_message "DEBUG" "HTTP code: '$http_code'"
+    log_message "DEBUG" "Response body: '$response_body'"
+    
+    if [[ $curl_exit_code -ne 0 ]]; then
+        log_message "ERROR" "Curl command failed with exit code: $curl_exit_code"
+        return 1
+    fi
     
     # According to Snipe-IT API docs, they return 200 even on errors
     if [[ $http_code -eq 200 ]]; then
@@ -566,7 +586,7 @@ check_asset_exists() {
     local asset_tag="$1"
     local asset_name="$2"
     
-    log_message "INFO" "Checking if asset exists"
+    log_message "INFO" "Checking if asset exists" >&2
     
     local search_term=""
     if [[ -n "$asset_tag" ]]; then
@@ -581,7 +601,7 @@ check_asset_exists() {
         "$SNIPEIT_SERVER/api/v1/hardware?search=$search_term&limit=1")
     
     if [[ $? -ne 0 ]]; then
-        log_message "WARNING" "Error checking if asset exists"
+        log_message "WARNING" "Error checking if asset exists" >&2
         return 1
     fi
     
@@ -590,12 +610,12 @@ check_asset_exists() {
     if [[ -n "$existing_asset" && "$existing_asset" != "null" ]]; then
         local existing_id=$(echo "$existing_asset" | jq -r '.id')
         local existing_name=$(echo "$existing_asset" | jq -r '.name')
-        log_message "WARNING" "Existing asset found - ID: $existing_id, Name: $existing_name"
-        echo "$existing_id"
+        log_message "WARNING" "Existing asset found - ID: $existing_id, Name: $existing_name" >&2
+        printf "%s" "$existing_id"
         return 0
     fi
     
-    log_message "INFO" "No existing asset found"
+    log_message "INFO" "No existing asset found" >&2
     return 1
 }
 
@@ -627,6 +647,16 @@ create_asset() {
     fi
     
     log_message "DEBUG" "Using model ID: $model_id"
+    
+    # Debug custom field values
+    log_message "DEBUG" "Custom field values:"
+    log_message "DEBUG" "  Disks: '$DISKS'"
+    log_message "DEBUG" "  Memory: '$MEMORY'"
+    log_message "DEBUG" "  vCPU: '$VCPU'"
+    log_message "DEBUG" "  Hostname: '$HOSTNAME'"
+    log_message "DEBUG" "  IP Address: '$IP_ADDRESS'"
+    log_message "DEBUG" "  OS: '$OS'"
+    log_message "DEBUG" "  Software: '$SOFTWARE'"
     
     # Handle empty values for JSON
     local company_json="null"
@@ -860,6 +890,7 @@ main() {
     # Check if asset exists (unless force create is enabled)
     if [[ "$FORCE_CREATE" != "true" ]]; then
         local existing_asset_id
+        # Capture only the asset ID from stdout, log messages go to stderr
         existing_asset_id=$(check_asset_exists "$ASSET_TAG" "$ASSET_NAME")
         if [[ $? -eq 0 && -n "$existing_asset_id" ]]; then
             log_message "INFO" "Asset already exists (ID: $existing_asset_id). Updating custom fields..."
@@ -1080,13 +1111,13 @@ fi
 [[ -z "$WARRANTY_MONTHS" ]] && WARRANTY_MONTHS="0"
 [[ -z "$ORDER_NUMBER" ]] && ORDER_NUMBER=""
 [[ -z "$INVOICE_NUMBER" ]] && INVOICE_NUMBER=""
-[[ -z "$DISKS" ]] && DISKS=""
+[[ -z "$DISKS" ]] && DISKS="Unknown"
 [[ -z "$MEMORY" ]] && MEMORY="0"
 [[ -z "$VCPU" ]] && VCPU="0"
-[[ -z "$HOSTNAME" ]] && HOSTNAME=""
-[[ -z "$IP_ADDRESS" ]] && IP_ADDRESS=""
-[[ -z "$OS" ]] && OS=""
-[[ -z "$SOFTWARE" ]] && SOFTWARE=""
+[[ -z "$HOSTNAME" ]] && HOSTNAME="Unknown"
+[[ -z "$IP_ADDRESS" ]] && IP_ADDRESS="Unknown"
+[[ -z "$OS" ]] && OS="Unknown"
+[[ -z "$SOFTWARE" ]] && SOFTWARE="Unknown"
 
 # Validate numeric fields
 if [[ -n "$MEMORY" && ! "$MEMORY" =~ ^[0-9]+$ ]]; then
