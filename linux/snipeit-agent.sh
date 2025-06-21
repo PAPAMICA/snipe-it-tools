@@ -44,8 +44,8 @@ log_message() {
 # Function to escape JSON strings
 escape_json_string() {
     local string="$1"
-    # Escape backslashes, quotes, and newlines
-    echo "$string" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\n/\\n/g' | sed 's/\r/\\r/g' | sed 's/\t/\\t/g'
+    # Escape backslashes, quotes, and convert newlines to \n
+    echo "$string" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/\r/\\r/g' | sed 's/\t/\\t/g'
 }
 
 # Function to detect system information
@@ -139,22 +139,22 @@ detect_system_info() {
         fi
     fi
     
-    # Detect installed software (improved formatting)
+    # Detect installed software (improved formatting for JSON compatibility)
     if [[ -z "$SOFTWARE" ]]; then
         local software_list=""
         
         # Detect package manager and list installed packages
         if command -v dpkg >/dev/null 2>&1; then
-            # Debian/Ubuntu systems - format as clean list
-            software_list=$(dpkg -l | grep '^ii' | awk '{print $2 " " $3}' | head -20 | sed 's/^/- /' | tr '\n' '\n' | sed 's/\n$//')
+            # Debian/Ubuntu systems - format as clean list with semicolons for JSON compatibility
+            software_list=$(dpkg -l | grep '^ii' | awk '{print $2 " " $3}' | head -20 | sed 's/^/- /' | tr '\n' '; ' | sed 's/; $//')
             log_message "INFO" "Detected software (Debian/Ubuntu): $software_list"
         elif command -v rpm >/dev/null 2>&1; then
-            # Red Hat/CentOS systems - format as clean list
-            software_list=$(rpm -qa --queryformat '%{NAME}-%{VERSION}\n' | head -20 | sed 's/^/- /' | tr '\n' '\n' | sed 's/\n$//')
+            # Red Hat/CentOS systems - format as clean list with semicolons
+            software_list=$(rpm -qa --queryformat '%{NAME}-%{VERSION}\n' | head -20 | sed 's/^/- /' | tr '\n' '; ' | sed 's/; $//')
             log_message "INFO" "Detected software (Red Hat/CentOS): $software_list"
         elif command -v pacman >/dev/null 2>&1; then
-            # Arch Linux systems - format as clean list
-            software_list=$(pacman -Q | head -20 | sed 's/^/- /' | tr '\n' '\n' | sed 's/\n$//')
+            # Arch Linux systems - format as clean list with semicolons
+            software_list=$(pacman -Q | head -20 | sed 's/^/- /' | tr '\n' '; ' | sed 's/; $//')
             log_message "INFO" "Detected software (Arch): $software_list"
         else
             software_list="Unknown package manager"
