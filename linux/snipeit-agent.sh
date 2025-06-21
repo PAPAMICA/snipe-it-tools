@@ -365,7 +365,7 @@ update_asset_custom_fields() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Build JSON for custom fields update - only include fields that exist in current asset
+    # Build JSON for custom fields update - only include fields that exist in the current asset
     local update_data="{"
     
     # Add our managed fields
@@ -377,7 +377,7 @@ update_asset_custom_fields() {
     update_data+="\"$OS_COLUMN\": \"$escaped_os\","
     update_data+="\"$SOFTWARE_COLUMN\": \"$escaped_software\""
     
-    # Add other custom fields only if they exist in current asset
+    # Add other custom fields only if they exist in the current asset
     local other_fields=("_snipeit_mac_address_1" "_snipeit_documentation_2" "_snipeit_supervision_3" "_snipeit_teams_11" "_snipeit_roles_12")
     
     for field in "${other_fields[@]}"; do
