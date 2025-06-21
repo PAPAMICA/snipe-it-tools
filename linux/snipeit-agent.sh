@@ -202,6 +202,7 @@ OPTIONS:
     --auto-install          Automatic dependency installation (curl, jq)
     --no-auto-detect        Disable automatic system information detection
     --no-custom-fields      Skip custom field column name retrieval (use defaults)
+    --force-custom-fields   Force update custom fields even if not associated with model
     --force-update          Force update of existing assets (update custom fields)
     -v, --verbose           Verbose mode
     -h, --help             Show this help
@@ -245,6 +246,8 @@ EXAMPLES:
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell OptiPlex 7090" --force-update --hostname "pc001.company.com" --ip-address "192.168.1.100"
 
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-custom-fields --no-auto-detect
+
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --force-custom-fields --force-update
 
 EOF
 }
@@ -1023,6 +1026,147 @@ detect_system_info() {
     fi
 }
 
+# Function to check and associate custom fields with model
+check_and_associate_custom_fields() {
+    local model_id="$1"
+    
+    log_message "INFO" "Checking if custom fields are associated with model ID: $model_id"
+    
+    # Get model details to see current fieldset
+    local response=$(curl -s -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        "$SNIPEIT_SERVER/api/v1/models/$model_id")
+    
+    if [[ $? -ne 0 ]]; then
+        log_message "WARNING" "Error getting model details"
+        if [[ "$FORCE_CUSTOM_FIELDS" == "true" ]]; then
+            log_message "INFO" "Force custom fields enabled, continuing without association"
+            return 0
+        else
+            return 1
+        fi
+    fi
+    
+    local current_fieldset=$(echo "$response" | jq -r '.fieldset // empty')
+    log_message "DEBUG" "Current model fieldset: $current_fieldset"
+    
+    # Check if our custom fields are in the fieldset
+    local missing_fields=()
+    
+    # Check each custom field
+    if [[ -n "$DISKS_COLUMN" && "$DISKS_COLUMN" != "_snipeit_disques_10" ]]; then
+        local field_id=$(echo "$fields_json" | jq -r --arg col "$DISKS_COLUMN" '.[] | select(.db_column_name == $col) | .id')
+        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
+            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
+                missing_fields+=("$field_id")
+            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
+                missing_fields+=("$field_id")
+            fi
+        fi
+    fi
+    
+    if [[ -n "$MEMORY_COLUMN" && "$MEMORY_COLUMN" != "_snipeit_memoire_9" ]]; then
+        local field_id=$(echo "$fields_json" | jq -r --arg col "$MEMORY_COLUMN" '.[] | select(.db_column_name == $col) | .id')
+        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
+            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
+                missing_fields+=("$field_id")
+            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
+                missing_fields+=("$field_id")
+            fi
+        fi
+    fi
+    
+    if [[ -n "$VCPU_COLUMN" && "$VCPU_COLUMN" != "_snipeit_vcpu_8" ]]; then
+        local field_id=$(echo "$fields_json" | jq -r --arg col "$VCPU_COLUMN" '.[] | select(.db_column_name == $col) | .id')
+        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
+            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
+                missing_fields+=("$field_id")
+            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
+                missing_fields+=("$field_id")
+            fi
+        fi
+    fi
+    
+    if [[ -n "$HOSTNAME_COLUMN" && "$HOSTNAME_COLUMN" != "_snipeit_hostname_7" ]]; then
+        local field_id=$(echo "$fields_json" | jq -r --arg col "$HOSTNAME_COLUMN" '.[] | select(.db_column_name == $col) | .id')
+        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
+            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
+                missing_fields+=("$field_id")
+            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
+                missing_fields+=("$field_id")
+            fi
+        fi
+    fi
+    
+    if [[ -n "$IP_COLUMN" && "$IP_COLUMN" != "_snipeit_adresse_ip_6" ]]; then
+        local field_id=$(echo "$fields_json" | jq -r --arg col "$IP_COLUMN" '.[] | select(.db_column_name == $col) | .id')
+        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
+            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
+                missing_fields+=("$field_id")
+            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
+                missing_fields+=("$field_id")
+            fi
+        fi
+    fi
+    
+    if [[ -n "$OS_COLUMN" && "$OS_COLUMN" != "_snipeit_os_4" ]]; then
+        local field_id=$(echo "$fields_json" | jq -r --arg col "$OS_COLUMN" '.[] | select(.db_column_name == $col) | .id')
+        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
+            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
+                missing_fields+=("$field_id")
+            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
+                missing_fields+=("$field_id")
+            fi
+        fi
+    fi
+    
+    if [[ -n "$SOFTWARE_COLUMN" && "$SOFTWARE_COLUMN" != "_snipeit_logiciels_5" ]]; then
+        local field_id=$(echo "$fields_json" | jq -r --arg col "$SOFTWARE_COLUMN" '.[] | select(.db_column_name == $col) | .id')
+        if [[ -n "$field_id" && "$field_id" != "null" ]]; then
+            if [[ -z "$current_fieldset" || "$current_fieldset" == "null" ]]; then
+                missing_fields+=("$field_id")
+            elif ! echo "$current_fieldset" | jq -e --arg id "$field_id" '.[] | select(.id == ($id | tonumber))' >/dev/null 2>&1; then
+                missing_fields+=("$field_id")
+            fi
+        fi
+    fi
+    
+    if [[ ${#missing_fields[@]} -gt 0 ]]; then
+        log_message "INFO" "Found ${#missing_fields[@]} custom fields not associated with model"
+        log_message "DEBUG" "Missing field IDs: ${missing_fields[*]}"
+        
+        if [[ "$FORCE_CUSTOM_FIELDS" == "true" ]]; then
+            log_message "INFO" "Force custom fields enabled, skipping association"
+            return 0
+        fi
+        
+        # Associate each missing field with the model
+        for field_id in "${missing_fields[@]}"; do
+            log_message "INFO" "Associating field ID $field_id with model $model_id"
+            
+            local associate_response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
+                -H "Accept: application/json" \
+                -H "Content-Type: application/json" \
+                -X POST \
+                -d "{\"model_id\": $model_id}" \
+                "$SNIPEIT_SERVER/api/v1/fields/$field_id/associate")
+            
+            local http_code=$(echo "$associate_response" | tail -n1)
+            local response_body=$(echo "$associate_response" | head -n -1)
+            
+            if [[ $http_code -eq 200 ]]; then
+                log_message "SUCCESS" "Field $field_id associated with model $model_id"
+            else
+                log_message "WARNING" "Failed to associate field $field_id with model $model_id (HTTP $http_code)"
+                log_message "DEBUG" "Response: $response_body"
+            fi
+        done
+    else
+        log_message "INFO" "All custom fields are already associated with the model"
+    fi
+}
+
 # Main function
 main() {
     log_message "INFO" "Starting SnipeIT asset creation script"
@@ -1098,6 +1242,11 @@ main() {
     
     log_message "INFO" "Using model ID: $model_id"
     
+    # Check and associate custom fields with model if needed
+    if [[ "$NO_CUSTOM_FIELDS" != "true" ]]; then
+        check_and_associate_custom_fields "$model_id"
+    fi
+    
     # Get other IDs
     local company_id=$(get_company_id)
     local location_id=$(get_location_id)
@@ -1140,6 +1289,7 @@ AUTO_INSTALL="false"
 NO_AUTO_DETECT="false"
 FORCE_UPDATE="false"
 NO_CUSTOM_FIELDS="false"
+FORCE_CUSTOM_FIELDS="false"
 
 # Custom field column names (will be populated by get_custom_field_columns)
 DISKS_COLUMN=""
@@ -1243,6 +1393,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-custom-fields)
             NO_CUSTOM_FIELDS="true"
+            shift
+            ;;
+        --force-custom-fields)
+            FORCE_CUSTOM_FIELDS="true"
             shift
             ;;
         --force-update)
