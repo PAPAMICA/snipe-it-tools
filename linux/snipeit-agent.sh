@@ -358,17 +358,8 @@ update_asset_custom_fields() {
     log_message "DEBUG" "Current asset data: $current_asset"
     log_message "DEBUG" "Current asset data retrieved successfully"
     
-    # Extract current custom field values with proper JSON handling
-    local current_doc=$(echo "$current_asset" | jq -r '._snipeit_documentation_2 // empty')
-    local current_sup=$(echo "$current_asset" | jq -r '._snipeit_supervision_3 // empty')
-    local current_teams=$(echo "$current_asset" | jq -r '._snipeit_teams_11 // empty')
-    local current_roles=$(echo "$current_asset" | jq -r '._snipeit_roles_12 // empty')
-    
-    # Escape the current values for JSON
-    local escaped_doc=$(escape_json_string "$current_doc")
-    local escaped_sup=$(escape_json_string "$current_sup")
-    local escaped_teams=$(escape_json_string "$current_teams")
-    local escaped_roles=$(escape_json_string "$current_roles")
+    # Extract current custom field values dynamically
+    log_message "DEBUG" "Extracting current custom field values dynamically..."
     
     # Escape custom field values for JSON
     local escaped_disks=$(escape_json_string "$DISKS")
@@ -377,8 +368,42 @@ update_asset_custom_fields() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Build JSON for custom fields update - include all custom fields with current values
-    local update_data=$(cat << EOF
+    # Get all custom fields that are not managed by this script
+    local managed_fields=("$DISKS_COLUMN" "$MEMORY_COLUMN" "$VCPU_COLUMN" "$HOSTNAME_COLUMN" "$IP_COLUMN" "$OS_COLUMN" "$SOFTWARE_COLUMN")
+    local preserved_fields=""
+    
+    # Extract all custom fields from the current asset
+    while IFS= read -r field_data; do
+        if [[ -n "$field_data" ]]; then
+            local field_name=$(echo "$field_data" | jq -r '.name')
+            local field_column=$(echo "$field_data" | jq -r '.db_column_name')
+            local field_value=$(echo "$field_data" | jq -r '.value // empty')
+            
+            # Check if this field is not managed by our script
+            local is_managed=false
+            for managed_field in "${managed_fields[@]}"; do
+                if [[ "$field_column" == "$managed_field" ]]; then
+                    is_managed=true
+                    break
+                fi
+            done
+            
+            # If not managed by our script, preserve its current value
+            if [[ "$is_managed" == "false" ]]; then
+                local escaped_value=$(escape_json_string "$field_value")
+                if [[ -n "$preserved_fields" ]]; then
+                    preserved_fields="$preserved_fields,"
+                fi
+                preserved_fields="$preserved_fields\"$field_column\": \"$escaped_value\""
+                log_message "DEBUG" "Preserving field: $field_name ($field_column) = '$field_value'"
+            fi
+        fi
+    done < <(echo "$current_asset" | jq -r '.custom_fields | to_entries[] | {name: .key, db_column_name: .value.field, value: .value.value}')
+    
+    # Build JSON for custom fields update
+    local update_data
+    if [[ -n "$preserved_fields" ]]; then
+        update_data=$(cat << EOF
 {
     "$DISKS_COLUMN": "$escaped_disks",
     "$MEMORY_COLUMN": $MEMORY,
@@ -387,13 +412,24 @@ update_asset_custom_fields() {
     "$IP_COLUMN": "$escaped_ip",
     "$OS_COLUMN": "$escaped_os",
     "$SOFTWARE_COLUMN": "$escaped_software",
-    "_snipeit_documentation_2": "$escaped_doc",
-    "_snipeit_supervision_3": "$escaped_sup",
-    "_snipeit_teams_11": "$escaped_teams",
-    "_snipeit_roles_12": "$escaped_roles"
+    $preserved_fields
 }
 EOF
 )
+    else
+        update_data=$(cat << EOF
+{
+    "$DISKS_COLUMN": "$escaped_disks",
+    "$MEMORY_COLUMN": $MEMORY,
+    "$VCPU_COLUMN": $VCPU,
+    "$HOSTNAME_COLUMN": "$escaped_hostname",
+    "$IP_COLUMN": "$escaped_ip",
+    "$OS_COLUMN": "$escaped_os",
+    "$SOFTWARE_COLUMN": "$escaped_software"
+}
+EOF
+)
+    fi
     
     # Validate JSON before sending
     if ! echo "$update_data" | jq . >/dev/null 2>&1; then
