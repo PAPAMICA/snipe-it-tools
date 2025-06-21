@@ -550,6 +550,12 @@ create_asset() {
     log_message "DEBUG" "Department ID: $department_id"
     log_message "DEBUG" "Supplier ID: $supplier_id"
     
+    # Validate model_id
+    if [[ -z "$model_id" || "$model_id" == "null" ]]; then
+        log_message "ERROR" "Invalid model ID: $model_id"
+        return 1
+    fi
+    
     # Handle empty values for JSON
     local company_json="null"
     [[ -n "$company_id" && "$company_id" != "null" ]] && company_json="$company_id"
@@ -706,6 +712,33 @@ detect_system_info() {
             log_message "WARNING" "Unable to detect hostname"
         fi
     fi
+    
+    # Detect installed software
+    if [[ -z "$SOFTWARE" ]]; then
+        local software_list=""
+        
+        # Detect package manager and list installed packages
+        if command -v dpkg >/dev/null 2>&1; then
+            # Debian/Ubuntu systems
+            software_list=$(dpkg -l | grep '^ii' | awk '{print $2 " " $3}' | head -20 | tr '\n' ', ' | sed 's/, $//')
+            log_message "INFO" "Detected software (Debian/Ubuntu): $software_list"
+        elif command -v rpm >/dev/null 2>&1; then
+            # Red Hat/CentOS systems
+            software_list=$(rpm -qa --queryformat '%{NAME}-%{VERSION}\n' | head -20 | tr '\n' ', ' | sed 's/, $//')
+            log_message "INFO" "Detected software (Red Hat/CentOS): $software_list"
+        elif command -v pacman >/dev/null 2>&1; then
+            # Arch Linux systems
+            software_list=$(pacman -Q | head -20 | tr '\n' ', ' | sed 's/, $//')
+            log_message "INFO" "Detected software (Arch): $software_list"
+        else
+            software_list="Unknown package manager"
+            log_message "WARNING" "Unable to detect installed software"
+        fi
+        
+        if [[ -n "$software_list" ]]; then
+            SOFTWARE="$software_list"
+        fi
+    fi
 }
 
 # Main function
@@ -754,7 +787,7 @@ main() {
     local department_id=$(get_department_id)
     local supplier_id=$(get_supplier_id)
     
-    # Create asset
+    # Create asset with explicit model_id
     if create_asset "$model_id" "$company_id" "$location_id" "$department_id" "$supplier_id"; then
         log_message "SUCCESS" "Asset created successfully in SnipeIT"
         exit 0
