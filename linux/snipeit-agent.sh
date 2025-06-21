@@ -201,6 +201,7 @@ OPTIONS:
     -i, --invoice-number INVOICE Invoice number (optional)
     --auto-install          Automatic dependency installation (curl, jq)
     --no-auto-detect        Disable automatic system information detection
+    --force-create          Force creation of new asset even if one exists
     -v, --verbose           Verbose mode
     -h, --help             Show this help
 
@@ -222,6 +223,11 @@ AUTO-DETECTION:
     - IP address
     - Hostname
 
+BEHAVIOR:
+    - If an asset exists, the script will update its custom fields
+    - Use --force-create to create a new asset even if one exists
+    - Use --no-auto-detect to disable automatic system detection
+
 SUPPORTED SYSTEMS:
     - Ubuntu, Debian, Linux Mint, Pop!_OS (APT)
     - CentOS, RHEL, Fedora, Rocky Linux, AlmaLinux (YUM/DNF)
@@ -239,6 +245,8 @@ EXAMPLES:
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "Dell PowerEdge R740" --auto-install
 
     $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --no-auto-detect
+
+    $0 -s "https://snipeit.company.com" -t "your-api-token" -m "VM Linux" --force-create
 
 EOF
 }
@@ -493,6 +501,66 @@ get_supplier_id() {
     echo "$supplier_id"
 }
 
+# Function to update existing asset
+update_asset() {
+    local asset_id="$1"
+    
+    log_message "INFO" "Updating existing asset: $ASSET_NAME (ID: $asset_id)"
+    
+    # Build JSON for asset update (only custom fields)
+    local asset_data=$(cat << EOF
+{
+    "custom_fields": {
+        "Disque(s)": "$DISKS",
+        "Mémoire": $MEMORY,
+        "vCPU": $VCPU,
+        "Hostname": "$HOSTNAME",
+        "Adresse IP": "$IP_ADDRESS",
+        "OS": "$OS",
+        "Logiciels": "$SOFTWARE"
+    }
+}
+EOF
+)
+    
+    # Validate JSON before sending
+    if ! echo "$asset_data" | jq . >/dev/null 2>&1; then
+        log_message "ERROR" "Invalid JSON generated for update:"
+        log_message "ERROR" "$asset_data"
+        return 1
+    fi
+    
+    log_message "DEBUG" "Asset update data: $asset_data"
+    
+    local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        -X PATCH \
+        -d "$asset_data" \
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
+    
+    local http_code=$(echo "$response" | tail -n1)
+    local response_body=$(echo "$response" | head -n -1)
+    
+    # According to Snipe-IT API docs, they return 200 even on errors
+    if [[ $http_code -eq 200 ]]; then
+        # Check if the response indicates success or error
+        local status=$(echo "$response_body" | jq -r '.status // empty')
+        if [[ "$status" == "success" ]]; then
+            log_message "SUCCESS" "Asset updated successfully - ID: $asset_id"
+            return 0
+        else
+            log_message "ERROR" "API returned error status: $status"
+            log_message "ERROR" "Response: $response_body"
+            return 1
+        fi
+    else
+        log_message "ERROR" "Error updating asset - HTTP Code: $http_code"
+        log_message "ERROR" "Response: $response_body"
+        return 1
+    fi
+}
+
 # Function to check if asset already exists
 check_asset_exists() {
     local asset_tag="$1"
@@ -523,6 +591,7 @@ check_asset_exists() {
         local existing_id=$(echo "$existing_asset" | jq -r '.id')
         local existing_name=$(echo "$existing_asset" | jq -r '.name')
         log_message "WARNING" "Existing asset found - ID: $existing_id, Name: $existing_name"
+        echo "$existing_id"
         return 0
     fi
     
@@ -788,10 +857,22 @@ main() {
     # Calculate dates
     calculate_dates
     
-    # Check if asset exists
-    if check_asset_exists "$ASSET_TAG" "$ASSET_NAME"; then
-        log_message "WARNING" "Asset already exists. Stopping script."
-        exit 0
+    # Check if asset exists (unless force create is enabled)
+    if [[ "$FORCE_CREATE" != "true" ]]; then
+        local existing_asset_id
+        existing_asset_id=$(check_asset_exists "$ASSET_TAG" "$ASSET_NAME")
+        if [[ $? -eq 0 && -n "$existing_asset_id" ]]; then
+            log_message "INFO" "Asset already exists (ID: $existing_asset_id). Updating custom fields..."
+            if update_asset "$existing_asset_id"; then
+                log_message "SUCCESS" "Asset updated successfully"
+                exit 0
+            else
+                log_message "ERROR" "Failed to update asset"
+                exit 1
+            fi
+        fi
+    else
+        log_message "INFO" "Force create enabled, skipping asset existence check"
     fi
     
     # Get model ID
@@ -844,6 +925,7 @@ SOFTWARE=""
 VERBOSE="false"
 AUTO_INSTALL="false"
 NO_AUTO_DETECT="false"
+FORCE_CREATE="false"
 
 # Argument processing
 while [[ $# -gt 0 ]]; do
@@ -934,6 +1016,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-auto-detect)
             NO_AUTO_DETECT="true"
+            shift
+            ;;
+        --force-create)
+            FORCE_CREATE="true"
             shift
             ;;
         -v|--verbose)
