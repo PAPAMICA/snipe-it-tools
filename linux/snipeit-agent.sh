@@ -365,7 +365,7 @@ update_asset_custom_fields() {
     local escaped_os=$(escape_json_string "$OS")
     local escaped_software=$(escape_json_string "$SOFTWARE")
     
-    # Build JSON for custom fields update - only include fields that exist and are not null
+    # Build JSON for custom fields update - only include fields that exist in current asset
     local update_data="{"
     
     # Add our managed fields
@@ -377,31 +377,20 @@ update_asset_custom_fields() {
     update_data+="\"$OS_COLUMN\": \"$escaped_os\","
     update_data+="\"$SOFTWARE_COLUMN\": \"$escaped_software\""
     
-    # Add other custom fields only if they exist and are not null
-    local mac_address=$(echo "$current_asset" | jq -r '._snipeit_mac_address_1 // empty')
-    if [[ -n "$mac_address" && "$mac_address" != "null" ]]; then
-        update_data+=", \"_snipeit_mac_address_1\": $(echo "$current_asset" | jq -r '._snipeit_mac_address_1')"
-    fi
+    # Add other custom fields only if they exist in current asset
+    local other_fields=("_snipeit_mac_address_1" "_snipeit_documentation_2" "_snipeit_supervision_3" "_snipeit_teams_11" "_snipeit_roles_12")
     
-    local documentation=$(echo "$current_asset" | jq -r '._snipeit_documentation_2 // empty')
-    if [[ -n "$documentation" && "$documentation" != "null" ]]; then
-        update_data+=", \"_snipeit_documentation_2\": $(echo "$current_asset" | jq -r '._snipeit_documentation_2')"
-    fi
-    
-    local supervision=$(echo "$current_asset" | jq -r '._snipeit_supervision_3 // empty')
-    if [[ -n "$supervision" && "$supervision" != "null" ]]; then
-        update_data+=", \"_snipeit_supervision_3\": $(echo "$current_asset" | jq -r '._snipeit_supervision_3')"
-    fi
-    
-    local teams=$(echo "$current_asset" | jq -r '._snipeit_teams_11 // empty')
-    if [[ -n "$teams" && "$teams" != "null" ]]; then
-        update_data+=", \"_snipeit_teams_11\": $(echo "$current_asset" | jq -r '._snipeit_teams_11')"
-    fi
-    
-    local roles=$(echo "$current_asset" | jq -r '._snipeit_roles_12 // empty')
-    if [[ -n "$roles" && "$roles" != "null" ]]; then
-        update_data+=", \"_snipeit_roles_12\": $(echo "$current_asset" | jq -r '._snipeit_roles_12')"
-    fi
+    for field in "${other_fields[@]}"; do
+        local field_value=$(echo "$current_asset" | jq -r ".$field // empty")
+        if [[ -n "$field_value" && "$field_value" != "null" ]]; then
+            # Escape the field value for JSON
+            local escaped_value=$(echo "$field_value" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+            update_data+=",\"$field\": \"$escaped_value\""
+            log_message "DEBUG" "Including existing field: $field = $field_value"
+        else
+            log_message "DEBUG" "Skipping field not present in asset: $field"
+        fi
+    done
     
     update_data+="}"
     
