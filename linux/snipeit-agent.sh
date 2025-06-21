@@ -379,13 +379,13 @@ update_asset_custom_fields() {
     
     log_message "DEBUG" "Update data: $update_data"
     
-    # Send PATCH request to update only custom fields
+    # Send PATCH request to update only custom fields using the customfields endpoint
     local response=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_TOKEN" \
         -H "Accept: application/json" \
         -H "Content-Type: application/json" \
         -X PATCH \
         -d "$update_data" \
-        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id")
+        "$SNIPEIT_SERVER/api/v1/hardware/$asset_id/customfields")
     
     local http_code=$(echo "$response" | tail -n1)
     local response_body=$(echo "$response" | head -n -1)
